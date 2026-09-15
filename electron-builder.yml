@@ -1,0 +1,34 @@
+appId: gov.miamidade.spartan-browser
+productName: Spartan Browser
+copyright: Miami-Dade County
+artifactName: SpartanBrowser-Setup-${version}.${ext}
+directories:
+  output: release
+files:
+  - electron-main.cjs
+  - electron-preload.cjs
+  - package.json
+extraResources:
+  - from: .output
+    to: app-server
+  - from: policy
+    to: policy
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Spartan Browser
+  installerLanguages:
+    - en_US
+publish:
+  - provider: github
+    owner: ROK-CJAY
+    repo: Spartan-Browser

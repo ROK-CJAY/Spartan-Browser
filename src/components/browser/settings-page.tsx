@@ -1259,8 +1259,8 @@ function AboutSection() {
     <>
       <Heading title="About this browser" />
       <Subhead>
-        Desks check GitHub ({HDB_REPO}) for a newer installer and for Knowledge admin UPNs in
-        policy/desk-policy.json.
+        Desks check GitHub ({HDB_REPO}) for a newer Windows installer and for Knowledge admin UPNs in
+        policy/desk-policy.json. Tag v0.9.0 (or later) on that repo to publish SpartanBrowser-Setup.
       </Subhead>
       <Group>
         <div className="flex items-start gap-3 px-4 py-4">
@@ -1305,7 +1305,7 @@ function AboutSection() {
               <p>Last checked {new Date(status.checkedAt).toLocaleString()}</p>
               <p>
                 {status.updateAvailable
-                  ? "A newer Help Desk Browser is on GitHub Releases. Install it on this PC, then relaunch."
+                  ? "A newer Spartan Browser installer is on GitHub Releases. Open the release, run the Setup .exe, then relaunch."
                   : "This desk is on the current shipped version."}
               </p>
               <p className="pt-2 font-medium text-[var(--fg)]">Knowledge admins from policy</p>

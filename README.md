@@ -15,4 +15,19 @@ Raw policy URL:
 
 To change admins, edit `policy/desk-policy.json` on `main`. Desks refresh on launch and every 30 minutes.
 
-To ship a new installer, bump `version` and push a `v1.x.x` tag.
+## Installable Windows release
+
+Push a version tag to build a Setup `.exe` and attach it to a GitHub Release:
+
+1. Set the same version in `package.json` and `src/lib/browser/desk-updates.ts` (`APP_VERSION`).
+2. Commit on `main`.
+3. Tag and push:
+
+```
+git tag v0.9.0
+git push origin v0.9.0
+```
+
+GitHub Actions (Windows) runs tests, builds `SpartanBrowser-Setup-<version>.exe` with NSIS, and publishes the Release (installer + `latest.yml` + policy file).
+
+Installed desks auto-check that Release. **Settings → About → Check now** also reads the policy file. Unsigned builds are expected until a County code-signing cert is added.
