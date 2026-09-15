@@ -16,9 +16,3 @@ Raw policy URL:
 To change admins, edit `policy/desk-policy.json` on `main`. Desks refresh on launch and every 30 minutes.
 
 To ship a new installer, bump `version` and push a `v1.x.x` tag.
-
-Shipped / fallback admins:
-
-- e315170@miamidade.gov
-- e325037@miamidade.gov
-- e310678@miamidade.gov
