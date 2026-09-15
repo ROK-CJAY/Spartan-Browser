@@ -1,13 +1,18 @@
 import { isCountyEmail, normalizeEmail, SEEDED_KNOWLEDGE_ADMINS } from "./knowledge-base.ts";
 
 
-export const APP_VERSION = "0.9.3";
+export const APP_VERSION = "0.9.4";
 export const HDB_REPO = "ROK-CJAY/Spartan-Browser";
 
 export const POLICY_URLS = [
   `https://raw.githubusercontent.com/${HDB_REPO}/main/policy/desk-policy.json`,
   `https://raw.githubusercontent.com/${HDB_REPO}/main/desk-policy.json`,
 ] as const;
+export const KNOWLEDGE_CATALOG_URLS = [
+  `https://raw.githubusercontent.com/${HDB_REPO}/main/knowledge/desk-knowledge.json`,
+  `https://api.github.com/repos/${HDB_REPO}/contents/knowledge/desk-knowledge.json?ref=main`,
+] as const;
+export const KNOWLEDGE_POLL_MS = 60_000;
 export const RELEASES_URL = `https://api.github.com/repos/${HDB_REPO}/releases/latest`;
 
 export type DeskPolicy = {

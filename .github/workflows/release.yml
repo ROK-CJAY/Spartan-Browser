@@ -32,5 +32,6 @@ jobs:
             release/*.exe
             release/*.yml
             policy/desk-policy.json
+            knowledge/desk-knowledge.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

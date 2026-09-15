@@ -14,8 +14,9 @@ import {
   X,
 } from "lucide-react";
 import { askDeskAgent, type DeskAgentArticle, type DeskAgentResult } from "@/lib/browser/desk-agent";
+import { composeAgentReply } from "@/lib/browser/desk-reply";
 import { DESK_AGENT_SUGGESTIONS, featuredArticles, retrieveArticles } from "@/lib/browser/knowledge-base";
-import { isHostedAdmin } from "@/lib/browser/desk-updates";
+import { isHostedAdmin, KNOWLEDGE_POLL_MS } from "@/lib/browser/desk-updates";
 import { getKnowledgeAccess, listPublishedKnowledge } from "@/lib/browser/knowledge-server";
 import { displayNameFromUpn } from "@/lib/browser/windows-identity";
 import { useBrowserStore } from "@/lib/browser/store";
@@ -42,6 +43,9 @@ export function WorkspaceHome() {
   const navigate = useBrowserStore((s) => s.navigate);
   const profile = useBrowserStore((s) => s.activeProfile());
   const upn = useBrowserStore((s) => s.config.entraUpn);
+  const ollamaEnabled = useBrowserStore((s) => s.config.ollamaEnabled);
+  const ollamaUrl = useBrowserStore((s) => s.config.ollamaUrl);
+  const ollamaModel = useBrowserStore((s) => s.config.ollamaModel);
   const name = upn ? displayNameFromUpn(upn) : profile.name;
   const first = name.split(/\s+/)[0] || name;
   const [query, setQuery] = useState("");
@@ -54,13 +58,27 @@ export function WorkspaceHome() {
   const agentRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    void listPublishedKnowledge()
-      .then((articles) => setFeatured(articles.filter((article) => article.featured).slice(0, 6)))
-      .catch(() => setFeatured(featuredArticles()));
-    void getKnowledgeAccess({ data: { upn } })
-      .then((access) => setIsAdmin(access.isAdmin || isHostedAdmin(upn)))
-      .catch(() => setIsAdmin(isHostedAdmin(upn)));
-
+    let cancelled = false;
+    async function load() {
+      try {
+        const articles = await listPublishedKnowledge();
+        if (!cancelled) setFeatured(articles.filter((article) => article.featured).slice(0, 6));
+      } catch {
+        if (!cancelled) setFeatured(featuredArticles());
+      }
+      try {
+        const access = await getKnowledgeAccess({ data: { upn } });
+        if (!cancelled) setIsAdmin(access.isAdmin || isHostedAdmin(upn));
+      } catch {
+        if (!cancelled) setIsAdmin(isHostedAdmin(upn));
+      }
+    }
+    void load();
+    const id = window.setInterval(() => void load(), KNOWLEDGE_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, [upn]);
 
   async function ask(raw?: string) {
@@ -71,7 +89,9 @@ export function WorkspaceHome() {
     setOpenId(null);
     agentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     try {
-      const next = await askDeskAgent({ data: { question } });
+      const next = await askDeskAgent({
+        data: { question, ollamaEnabled, ollamaUrl, ollamaModel },
+      });
       setResult(next);
       setOpenId(next.articles[0]?.id ?? null);
     } catch {
@@ -285,7 +305,7 @@ function localDeskResult(question: string): DeskAgentResult {
       articles: [],
     };
   }
-  return { ok: true, mode: "articles", text: "", articles };
+  return { ok: true, mode: "agent", text: composeAgentReply(question, articles), articles };
 }
 
 function AgentResult({
@@ -299,7 +319,7 @@ function AgentResult({
 }) {
   const articles = result.articles;
   const mixed = new Set(articles.map((a) => a.currency)).size > 1;
-  const grok = result.ok && result.mode === "grok" && result.text;
+  const spoken = result.ok && result.text;
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -308,21 +328,17 @@ function AgentResult({
 
   return (
     <div ref={boxRef} className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5">
-      {grok ? (
+      {spoken ? (
         <div className="space-y-3">
-          <p className="text-xs font-medium tracking-[0.14em] text-[var(--muted)] uppercase">Desk agent</p>
+          <p className="text-xs font-medium tracking-[0.14em] text-[var(--muted)] uppercase">
+            {result.mode === "ollama" ? "Desk agent · this PC" : "Desk agent"}
+          </p>
           <div className="space-y-3 text-sm leading-relaxed whitespace-pre-wrap">{formatAgentText(result.text)}</div>
         </div>
       ) : (
         <div className="space-y-2">
-          <p className="text-xs font-medium tracking-[0.14em] text-[var(--muted)] uppercase">
-            {result.ok ? "Matching Remedy articles" : "Desk agent"}
-          </p>
-          <p className="text-sm leading-relaxed text-[var(--muted)]">
-            {result.ok
-              ? "Matching Remedy articles. Current entries win when steps disagree."
-              : result.error}
-          </p>
+          <p className="text-xs font-medium tracking-[0.14em] text-[var(--muted)] uppercase">Desk agent</p>
+          <p className="text-sm leading-relaxed text-[var(--muted)]">{result.ok ? "" : result.error}</p>
         </div>
       )}
       {mixed ? (

@@ -885,18 +885,59 @@ function AssistantSection() {
     <>
       <Heading title="Desk assistant" />
       <Subhead>
-        The Workspace tab searches Remedy knowledge and, when available, consolidates mixed-age articles into one answer.
-        Knowledge admins train that catalog. Desk and Workspace stay unchanged for everyone else.
+        Workspace retrieves Remedy articles and writes an answer a phone agent can read. Optional: a model on this PC
+        (Ollama, localhost only). Knowledge admins train the catalog and can push it to every open desk.
       </Subhead>
       <Group>
         <Toggle label="Show assistant in the sidebar" checked={config.aiAssist} onChange={(v) => setConfig({ aiAssist: v })} />
+        <Toggle
+          label="Use a local model on this PC"
+          hint="Ollama at 127.0.0.1 only. If it is not running, the desk agent still answers from the articles."
+          checked={config.ollamaEnabled}
+          onChange={(v) => setConfig({ ollamaEnabled: v })}
+        />
         <Row
           icon={Bot}
           title="Knowledge admin"
-          hint="Add, edit, retire, and expire articles"
+          hint="Add, edit, import Excel, and publish articles"
           onClick={() => navigate("mdc://knowledge", "Knowledge")}
         />
       </Group>
+      <div className="mt-4 space-y-3">
+        <label className="block text-[13px] font-medium">
+          Ollama address
+          <Input
+            className="mt-1"
+            value={config.ollamaUrl}
+            onChange={(e) => setConfig({ ollamaUrl: e.target.value })}
+            placeholder="http://127.0.0.1:11434"
+          />
+        </label>
+        <label className="block text-[13px] font-medium">
+          Ollama model
+          <Input
+            className="mt-1"
+            value={config.ollamaModel}
+            onChange={(e) => setConfig({ ollamaModel: e.target.value })}
+            placeholder="llama3.1"
+          />
+        </label>
+        <label className="block text-[13px] font-medium">
+          GitHub token (publish knowledge)
+          <Input
+            className="mt-1"
+            type="password"
+            autoComplete="off"
+            value={config.githubPublishToken}
+            onChange={(e) => setConfig({ githubPublishToken: e.target.value })}
+            placeholder="ghp_…"
+          />
+          <span className="mt-1 block text-[12px] font-normal text-[var(--muted)]">
+            Contents access to ROK-CJAY/Spartan-Browser. Stored on this PC. Used only to publish
+            knowledge/desk-knowledge.json so every open desk can pull it.
+          </span>
+        </label>
+      </div>
     </>
   );
 }
@@ -1295,7 +1336,7 @@ function AboutSection() {
       <Subhead>
         {desktop
           ? "Check GitHub Releases for a newer Spartan Browser. When it finishes downloading, restart here to install it."
-          : "Check GitHub Releases for a newer Windows installer. Policy for Knowledge admins refreshes at the same time."}
+          : "Check GitHub Releases for a newer Windows installer. Knowledge articles and the admin list refresh from this repo while Spartan is open."}
       </Subhead>
       <Group>
         <div className="flex items-start gap-3 px-4 py-4">

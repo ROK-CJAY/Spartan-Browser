@@ -13,6 +13,8 @@ extraResources:
     to: app-server
   - from: policy
     to: policy
+  - from: knowledge
+    to: knowledge
   - from: node_modules/@electric-sql/pglite/dist/pglite.data
     to: app-server/server/_libs/pglite.data
   - from: node_modules/@electric-sql/pglite/dist/pglite.wasm

@@ -13,7 +13,11 @@ import {
   type ArticleCurrency,
   type KnowledgeArticle,
 } from "./knowledge-base";
-import { isHostedAdmin, setHostedAdmins } from "./desk-updates";
+import { isHostedAdmin, setHostedAdmins, HDB_REPO } from "./desk-updates";
+import {
+  serializeKnowledgeCatalog,
+  type ImportedArticle,
+} from "./knowledge-import";
 
 export type KnowledgeAdmin = {
   email: string;
@@ -265,6 +269,117 @@ function sanitizeArticle(input: ArticleInput): ArticleInput {
   };
 }
 
+async function upsertArticleRow(article: ArticleInput, updatedBy: string) {
+  const sql = await getSql();
+  await sql.query(
+    `insert into knowledge_articles (
+      id, title, summary, steps_json, keywords_json, last_reviewed, currency, featured,
+      supersedes_json, stale_note, expires_on, retired, updated_by, updated_at
+    ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
+    on conflict (id) do update set
+      title = excluded.title,
+      summary = excluded.summary,
+      steps_json = excluded.steps_json,
+      keywords_json = excluded.keywords_json,
+      last_reviewed = excluded.last_reviewed,
+      currency = excluded.currency,
+      featured = excluded.featured,
+      supersedes_json = excluded.supersedes_json,
+      stale_note = excluded.stale_note,
+      expires_on = excluded.expires_on,
+      retired = excluded.retired,
+      updated_by = excluded.updated_by,
+      updated_at = now()`,
+    [
+      article.id,
+      article.title,
+      article.summary,
+      JSON.stringify(article.steps),
+      JSON.stringify(article.keywords),
+      article.lastReviewed,
+      article.currency,
+      article.featured,
+      JSON.stringify(article.supersedes),
+      article.staleNote || null,
+      article.expiresOn,
+      article.retired,
+      updatedBy,
+    ],
+  );
+}
+
+export async function applyHostedKnowledge(articles: KnowledgeArticle[]) {
+  if (!articles.length) return;
+  try {
+    await seedKnowledgeIfNeeded();
+    const sql = await getSql();
+    const hostedIds = new Set<string>();
+    for (const article of articles) {
+      const input = sanitizeArticle({
+        id: article.id,
+        title: article.title,
+        summary: article.summary,
+        steps: article.steps,
+        keywords: article.keywords,
+        lastReviewed: article.lastReviewed,
+        currency: article.currency,
+        featured: Boolean(article.featured),
+        supersedes: article.supersedes ?? [],
+        staleNote: article.staleNote ?? "",
+        expiresOn: article.expiresOn ?? null,
+        retired: Boolean(article.retired),
+      });
+      hostedIds.add(input.id);
+      await upsertArticleRow(input, "github");
+    }
+    const rows = await sql.query<{ id: string; updated_by: string | null }>(
+      "select id, updated_by from knowledge_articles",
+    );
+    for (const row of rows) {
+      if (row.updated_by === "github" && !hostedIds.has(row.id)) {
+        await sql.query("update knowledge_articles set retired = true, updated_at = now() where id = $1", [row.id]);
+      }
+    }
+    bumpKnowledgeCache();
+  } catch (err) {
+    console.error("[knowledge] hosted catalog skipped:", err);
+  }
+}
+
+async function publishCatalog(updatedBy: string, token: string) {
+  const articles = await loadAllArticles();
+  const catalog = serializeKnowledgeCatalog(articles, updatedBy);
+  const content = Buffer.from(JSON.stringify(catalog, null, 2), "utf8").toString("base64");
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "Spartan-Browser",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const url = `https://api.github.com/repos/${HDB_REPO}/contents/knowledge/desk-knowledge.json`;
+  const existing = await fetch(`${url}?ref=main`, { headers, cache: "no-store" });
+  let sha: string | undefined;
+  if (existing.ok) {
+    const json = (await existing.json()) as { sha?: string };
+    sha = json.sha;
+  }
+  const put = await fetch(url, {
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: `Publish desk knowledge (${articles.length} articles)`,
+      content,
+      sha,
+      branch: "main",
+    }),
+  });
+  if (!put.ok) {
+    const text = await put.text();
+    throw new Error(`Could not publish to GitHub (${put.status}). ${text.slice(0, 160)}`);
+  }
+  return { published: true as const, count: articles.length, updatedAt: catalog.updatedAt };
+}
+
 export const getKnowledgeAccess = createServerFn({ method: "POST" })
   .validator((input: { upn?: string }) => ({ upn: callerUpn(input?.upn) }))
   .handler(async ({ data }): Promise<KnowledgeAccess> => {
@@ -320,42 +435,7 @@ export const saveKnowledgeArticle = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const admin = await requireAdmin(data.upn);
     const article = data.article;
-    const sql = await getSql();
-    await sql.query(
-      `insert into knowledge_articles (
-        id, title, summary, steps_json, keywords_json, last_reviewed, currency, featured,
-        supersedes_json, stale_note, expires_on, retired, updated_by, updated_at
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
-      on conflict (id) do update set
-        title = excluded.title,
-        summary = excluded.summary,
-        steps_json = excluded.steps_json,
-        keywords_json = excluded.keywords_json,
-        last_reviewed = excluded.last_reviewed,
-        currency = excluded.currency,
-        featured = excluded.featured,
-        supersedes_json = excluded.supersedes_json,
-        stale_note = excluded.stale_note,
-        expires_on = excluded.expires_on,
-        retired = excluded.retired,
-        updated_by = excluded.updated_by,
-        updated_at = now()`,
-      [
-        article.id,
-        article.title,
-        article.summary,
-        JSON.stringify(article.steps),
-        JSON.stringify(article.keywords),
-        article.lastReviewed,
-        article.currency,
-        article.featured,
-        JSON.stringify(article.supersedes),
-        article.staleNote || null,
-        article.expiresOn,
-        article.retired,
-        admin.email,
-      ],
-    );
+    await upsertArticleRow(article, admin.email);
     bumpKnowledgeCache();
     return article;
   });
@@ -415,4 +495,57 @@ export const removeKnowledgeAdmin = createServerFn({ method: "POST" })
     }
     await sql.query("delete from knowledge_admins where email = $1", [data.email]);
     return listAdmins();
+  });
+
+export const importKnowledgeArticles = createServerFn({ method: "POST" })
+  .validator((input: { upn?: string; articles?: ImportedArticle[] }) => ({
+    upn: callerUpn(input?.upn),
+    articles: Array.isArray(input?.articles) ? input.articles.slice(0, 2000) : [],
+  }))
+  .handler(async ({ data }) => {
+    const admin = await requireAdmin(data.upn);
+    let imported = 0;
+    const errors: string[] = [];
+    for (const row of data.articles) {
+      try {
+        const article = sanitizeArticle({
+          id: row.id,
+          title: row.title,
+          summary: row.summary,
+          steps: row.steps ?? [],
+          keywords: row.keywords ?? [],
+          lastReviewed: row.lastReviewed,
+          currency: row.currency,
+          featured: Boolean(row.featured),
+          supersedes: row.supersedes ?? [],
+          staleNote: row.staleNote ?? "",
+          expiresOn: row.expiresOn ?? null,
+          retired: Boolean(row.retired),
+        });
+        await upsertArticleRow(article, admin.email);
+        imported += 1;
+      } catch (err) {
+        if (errors.length < 8) {
+          errors.push(err instanceof Error ? err.message : `Could not import ${String(row?.id ?? "row")}.`);
+        }
+      }
+    }
+    bumpKnowledgeCache();
+    return { imported, skipped: data.articles.length - imported, errors };
+  });
+
+export const publishKnowledgeCatalog = createServerFn({ method: "POST" })
+  .validator((input: { upn?: string; token?: string }) => ({
+    upn: callerUpn(input?.upn),
+    token: String(input?.token ?? "").trim(),
+  }))
+  .handler(async ({ data }) => {
+    const admin = await requireAdmin(data.upn);
+    const token = data.token || process.env.SPARTAN_GITHUB_TOKEN || "";
+    if (!token) {
+      throw new Error(
+        "Add a GitHub token with Contents access to ROK-CJAY/Spartan-Browser to push knowledge to every desk.",
+      );
+    }
+    return publishCatalog(admin.email, token);
   });

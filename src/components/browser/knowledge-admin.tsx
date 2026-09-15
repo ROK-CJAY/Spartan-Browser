@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { BookOpen, ChevronLeft, Plus, Shield, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, ChevronLeft, CloudUpload, FileSpreadsheet, Plus, Shield, Trash2, Upload } from "lucide-react";
 import {
   addKnowledgeAdmin,
   getKnowledgeAccess,
+  importKnowledgeArticles,
   listManagedKnowledge,
+  publishKnowledgeCatalog,
   removeKnowledgeAdmin,
   retireKnowledgeArticle,
   saveKnowledgeArticle,
@@ -12,6 +14,12 @@ import {
 } from "@/lib/browser/knowledge-server";
 import { todayISO, isCountyEmail, isShippedAdmin, type ArticleCurrency, type KnowledgeArticle } from "@/lib/browser/knowledge-base";
 import { isHostedAdmin } from "@/lib/browser/desk-updates";
+import {
+  KNOWLEDGE_TEMPLATE_CSV,
+  parseKnowledgeCsv,
+  parseKnowledgeRows,
+  type ImportReport,
+} from "@/lib/browser/knowledge-import";
 import { useBrowserStore } from "@/lib/browser/store";
 import { GuestSignIn } from "./identity";
 import { Button } from "@/components/ui/button";
@@ -52,14 +60,20 @@ function toInput(article: KnowledgeArticle): ArticleInput {
 export function KnowledgeAdminPage() {
   const goHome = useBrowserStore((s) => s.goHome);
   const upn = useBrowserStore((s) => s.config.entraUpn);
+  const token = useBrowserStore((s) => s.config.githubPublishToken);
+  const setConfig = useBrowserStore((s) => s.setConfig);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [access, setAccess] = useState<KnowledgeAccess | null>(null);
   const [articles, setArticles] = useState<KnowledgeArticle[]>([]);
   const [form, setForm] = useState<ArticleInput>(EMPTY);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [filter, setFilter] = useState("");
+  const [preview, setPreview] = useState<ImportReport | null>(null);
+  const [pushOnSave, setPushOnSave] = useState(true);
 
   async function refresh() {
     const next = await getKnowledgeAccess({ data: { upn } });
@@ -98,14 +112,30 @@ export function KnowledgeAdminPage() {
     });
   }, [articles, filter]);
 
+  async function pushAll() {
+    const result = await publishKnowledgeCatalog({ data: { upn, token } });
+    setNotice(`Published ${result.count} articles to every desk. Open Spartan copies pick this up within a minute.`);
+  }
+
+  async function maybePush() {
+    if (!pushOnSave) return;
+    if (!token.trim()) {
+      setNotice("Saved on this desk only. Add a GitHub token below to push to every open Spartan.");
+      return;
+    }
+    await pushAll();
+  }
+
   async function save() {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await saveKnowledgeArticle({ data: { ...form, upn } });
       setEditing(false);
       setForm(EMPTY);
       await refresh();
+      await maybePush();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save article.");
     } finally {
@@ -116,9 +146,11 @@ export function KnowledgeAdminPage() {
   async function toggleRetire(article: KnowledgeArticle) {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await retireKnowledgeArticle({ data: { id: article.id, retired: !article.retired, upn } });
       await refresh();
+      await maybePush();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update article.");
     } finally {
@@ -153,6 +185,57 @@ export function KnowledgeAdminPage() {
     }
   }
 
+  async function onPickFile(file: File | undefined) {
+    if (!file) return;
+    setError("");
+    setNotice("");
+    try {
+      const report = await parseSpreadsheet(file);
+      setPreview(report);
+      if (!report.articles.length) {
+        setError(report.errors[0] || "No usable Remedy rows in that spreadsheet.");
+      }
+    } catch (err) {
+      setPreview(null);
+      setError(err instanceof Error ? err.message : "Could not read that spreadsheet.");
+    }
+  }
+
+  async function confirmImport() {
+    if (!preview?.articles.length) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await importKnowledgeArticles({ data: { upn, articles: preview.articles } });
+      setPreview(null);
+      await refresh();
+      setNotice(
+        `Imported ${result.imported} article${result.imported === 1 ? "" : "s"}${
+          result.skipped ? ` (${result.skipped} skipped)` : ""
+        }.`,
+      );
+      await maybePush();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not import spreadsheet.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishNow() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await pushAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not publish to GitHub.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!access) {
     return <div className="h-full animate-pulse bg-[var(--bg)]" />;
   }
@@ -176,8 +259,8 @@ export function KnowledgeAdminPage() {
             <div>
               <h1 className="font-display text-2xl font-medium tracking-tight">Knowledge admin</h1>
               <p className="max-w-2xl text-sm leading-relaxed text-[var(--muted)]">
-                Train the desk agent by adding, editing, retiring, and expiring Remedy articles. Access is the Windows /
-                Entra account on this PC (@miamidade.gov). Desk and Workspace stay the same for everyone else.
+                Train the desk agent from Remedy: add articles, upload the Excel export, and publish so every open
+                Spartan picks up the change. Access is the Windows / Entra account on this PC (@miamidade.gov).
               </p>
             </div>
           </div>
@@ -204,6 +287,7 @@ export function KnowledgeAdminPage() {
         ) : (
           <>
             {error ? <p className="text-sm text-red-400">{error}</p> : null}
+            {notice ? <p className="text-sm text-[var(--accent)]">{notice}</p> : null}
 
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5">
               <div className="mb-3 flex items-center gap-2 text-sm font-medium">
@@ -257,6 +341,97 @@ export function KnowledgeAdminPage() {
                   Add admin
                 </Button>
               </div>
+            </section>
+
+            <section className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                <FileSpreadsheet className="size-4 text-[var(--accent)]" />
+                Remedy spreadsheet
+              </div>
+              <p className="mb-3 text-xs leading-relaxed text-[var(--muted)]">
+                Upload the Excel or CSV export from Remedy (KM ID, Title, Question/Summary, Answer/Steps, Status).
+                Existing IDs are updated. Download the template if your export uses different column names.
+              </p>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="sr-only"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  void onPickFile(file);
+                }}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
+                  <Upload className="size-4" />
+                  Upload Excel / CSV
+                </Button>
+                <Button type="button" variant="outline" onClick={() => downloadTemplate()}>
+                  Download template
+                </Button>
+              </div>
+              {preview ? (
+                <div className="mt-4 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                  <p className="text-sm">
+                    Ready to import {preview.articles.length} article{preview.articles.length === 1 ? "" : "s"}
+                    {preview.skipped ? ` (${preview.skipped} rows skipped)` : ""}.
+                  </p>
+                  {preview.errors.length ? (
+                    <ul className="list-disc space-y-1 pl-5 text-xs text-[var(--muted)]">
+                      {preview.errors.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <ul className="max-h-40 space-y-1 overflow-auto text-xs text-[var(--muted)]">
+                    {preview.articles.slice(0, 12).map((article) => (
+                      <li key={article.id}>
+                        {article.id} · {article.title}
+                      </li>
+                    ))}
+                    {preview.articles.length > 12 ? <li>…and {preview.articles.length - 12} more</li> : null}
+                  </ul>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" disabled={busy || !preview.articles.length} onClick={() => void confirmImport()}>
+                      {busy ? "Importing…" : "Import these articles"}
+                    </Button>
+                    <Button type="button" variant="outline" disabled={busy} onClick={() => setPreview(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                <CloudUpload className="size-4 text-[var(--accent)]" />
+                Push to every desk
+              </div>
+              <p className="mb-3 text-xs leading-relaxed text-[var(--muted)]">
+                Publishing writes knowledge/desk-knowledge.json on github.com/ROK-CJAY/Spartan-Browser. Every open
+                Spartan pulls that file about once a minute — no restart. Token stays on this PC.
+              </p>
+              <label className="mb-3 block text-xs font-medium">
+                GitHub token
+                <Input
+                  className="mt-1"
+                  type="password"
+                  autoComplete="off"
+                  value={token}
+                  onChange={(e) => setConfig({ githubPublishToken: e.target.value })}
+                  placeholder="ghp_… with Contents access"
+                />
+              </label>
+              <label className="mb-3 flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={pushOnSave} onChange={(e) => setPushOnSave(e.target.checked)} />
+                Push to all desks when I save, import, or retire
+              </label>
+              <Button type="button" disabled={busy} onClick={() => void publishNow()}>
+                {busy ? "Publishing…" : "Publish to all desks now"}
+              </Button>
             </section>
 
             <section className="flex flex-col gap-3">
@@ -334,6 +509,36 @@ export function KnowledgeAdminPage() {
   );
 }
 
+async function parseSpreadsheet(file: File): Promise<ImportReport> {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".csv") || name.endsWith(".txt") || file.type === "text/csv") {
+    return parseKnowledgeCsv(await file.text());
+  }
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
+  if (!sheet) return { articles: [], skipped: 0, errors: ["The spreadsheet has no sheets."] };
+  const rows = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(sheet, {
+    header: 1,
+    raw: false,
+    defval: "",
+  });
+  if (rows.length < 2) return { articles: [], skipped: 0, errors: ["The spreadsheet is empty."] };
+  const headers = (rows[0] ?? []).map((cell) => String(cell ?? ""));
+  const body = rows.slice(1).map((row) => (Array.isArray(row) ? row : []).map((cell) => String(cell ?? "")));
+  return parseKnowledgeRows(headers, body);
+}
+
+function downloadTemplate() {
+  const blob = new Blob([KNOWLEDGE_TEMPLATE_CSV], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "spartan-knowledge-template.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function GateCard({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5">
@@ -343,10 +548,7 @@ function GateCard({ title, body }: { title: string; body: string }) {
   );
 }
 
-
-
 function Badge({ children }: { children: React.ReactNode }) {
-
   return (
     <span className="rounded-full bg-[var(--btn)] px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
       {children}

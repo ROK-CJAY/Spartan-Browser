@@ -128,6 +128,10 @@ export type BrowserConfig = {
   syncEnabled: boolean;
   downloadAsk: boolean;
   aiAssist: boolean;
+  ollamaEnabled: boolean;
+  ollamaUrl: string;
+  ollamaModel: string;
+  githubPublishToken: string;
   searchSuggestions: boolean;
   httpsOnly: boolean;
   trackingPrevention: TrackingLevel;
@@ -431,6 +435,10 @@ export function defaultConfig(): BrowserConfig {
     syncEnabled: true,
     downloadAsk: true,
     aiAssist: false,
+    ollamaEnabled: true,
+    ollamaUrl: "http://127.0.0.1:11434",
+    ollamaModel: "llama3.1",
+    githubPublishToken: "",
     searchSuggestions: true,
     httpsOnly: true,
     trackingPrevention: "balanced",

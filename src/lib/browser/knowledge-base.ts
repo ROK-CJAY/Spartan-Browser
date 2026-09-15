@@ -377,6 +377,7 @@ export function retrieveArticles(
         if (title.includes(token)) score += 5;
         if (keys.some((k) => k === token || k.includes(token) || token.includes(k))) score += 3;
         if (body.includes(token)) score += 1;
+        if (article.id.toLowerCase().includes(token)) score += 8;
       }
       const phrase = query.trim().toLowerCase();
       if (phrase.length > 4 && article.title.toLowerCase().includes(phrase)) score += 6;

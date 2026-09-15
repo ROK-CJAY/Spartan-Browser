@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   APP_VERSION,
+  KNOWLEDGE_POLL_MS,
   buildUpdateStatus,
   compareVersions,
   fallbackPolicy,
@@ -63,5 +64,11 @@ describe("hosted admins cache", () => {
     assert.equal(isHostedAdmin("E310678@miamidade.gov"), true);
     assert.equal(isHostedAdmin("e315170@miamidade.gov"), false);
     setHostedAdmins([]);
+  });
+});
+
+describe("knowledge poll", () => {
+  it("checks open desks about once a minute", () => {
+    assert.equal(KNOWLEDGE_POLL_MS, 60_000);
   });
 });

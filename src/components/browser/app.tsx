@@ -64,8 +64,8 @@ import {
   typoSuspect,
   type PanelId,
 } from "@/lib/browser/types";
-import { checkDeskUpdates } from "@/lib/browser/desk-updates-server";
-import { isHostedAdmin, type DeskUpdateStatus } from "@/lib/browser/desk-updates";
+import { checkDeskUpdates, syncHostedKnowledge } from "@/lib/browser/desk-updates-server";
+import { isHostedAdmin, KNOWLEDGE_POLL_MS, type DeskUpdateStatus } from "@/lib/browser/desk-updates";
 import { isSpartanDesktop, installDesktopUpdate, readDesktopUpdateStatus, readDesktopWindowsIdentity, subscribeDesktopUpdates } from "@/lib/browser/desktop";
 import type { DesktopUpdateStatus } from "@/types/spartan-desktop";
 import { expiryState, loginForTool } from "@/lib/browser/vault-crypto";
@@ -269,6 +269,14 @@ function Chrome({
       cancelled = true;
       window.clearInterval(id);
     };
+  }, []);
+
+  useEffect(() => {
+    void syncHostedKnowledge().catch(() => {});
+    const id = window.setInterval(() => {
+      void syncHostedKnowledge().catch(() => {});
+    }, KNOWLEDGE_POLL_MS);
+    return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {

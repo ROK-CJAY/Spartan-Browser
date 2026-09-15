@@ -1,9 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { applyHostedAdmins } from "./knowledge-server";
+import { applyHostedAdmins, applyHostedKnowledge } from "./knowledge-server";
+import { parseKnowledgeCatalog } from "./knowledge-import";
 import {
   APP_VERSION,
+  KNOWLEDGE_CATALOG_URLS,
   POLICY_URLS,
   RELEASES_URL,
   buildUpdateStatus,
@@ -14,6 +16,7 @@ import {
 } from "./desk-updates";
 
 const FETCH_MS = 8000;
+let lastKnowledgeAt = "";
 
 async function fetchJson(url: string): Promise<unknown | null> {
   const ctrl = new AbortController();
@@ -34,6 +37,19 @@ async function fetchJson(url: string): Promise<unknown | null> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function decodeGithubFile(json: unknown): unknown {
+  if (!json || typeof json !== "object") return json;
+  const value = json as Record<string, unknown>;
+  if (typeof value.content === "string" && typeof value.sha === "string") {
+    try {
+      return JSON.parse(Buffer.from(value.content.replace(/\n/g, ""), "base64").toString("utf8"));
+    } catch {
+      return json;
+    }
+  }
+  return json;
 }
 
 async function loadFallbackFile(): Promise<DeskPolicy | null> {
@@ -67,9 +83,57 @@ async function loadLatestRelease(): Promise<{ tag: string | null; url: string | 
   return { tag, url, notes };
 }
 
+async function loadFallbackKnowledge() {
+  const candidates = [
+    path.join(process.cwd(), "knowledge", "desk-knowledge.json"),
+    path.join(process.cwd(), "public", "desk-knowledge.json"),
+  ];
+  for (const file of candidates) {
+    try {
+      const raw = await readFile(file, "utf-8");
+      const catalog = parseKnowledgeCatalog(JSON.parse(raw) as unknown);
+      if (catalog) return catalog;
+    } catch {
+      /* next */
+    }
+  }
+  return null;
+}
+
+async function loadHostedKnowledge() {
+  for (const url of KNOWLEDGE_CATALOG_URLS) {
+    const json = await fetchJson(url);
+    if (!json) continue;
+    const catalog = parseKnowledgeCatalog(decodeGithubFile(json));
+    if (catalog) return catalog;
+  }
+  return loadFallbackKnowledge();
+}
+
+export async function pullHostedKnowledge() {
+  const catalog = await loadHostedKnowledge();
+  if (!catalog) return { updatedAt: null as string | null, count: 0, applied: false };
+  if (catalog.updatedAt && catalog.updatedAt === lastKnowledgeAt) {
+    return { updatedAt: catalog.updatedAt, count: catalog.articles.length, applied: false };
+  }
+  await applyHostedKnowledge(catalog.articles);
+  lastKnowledgeAt = catalog.updatedAt;
+  return { updatedAt: catalog.updatedAt, count: catalog.articles.length, applied: true };
+}
+
+export const syncHostedKnowledge = createServerFn({ method: "GET" }).handler(async () => {
+  try {
+    return await pullHostedKnowledge();
+  } catch (err) {
+    console.error("[knowledge] pull skipped:", err);
+    return { updatedAt: null, count: 0, applied: false };
+  }
+});
+
 export const checkDeskUpdates = createServerFn({ method: "GET" }).handler(async (): Promise<DeskUpdateStatus> => {
   const [{ policy, source }, release] = await Promise.all([loadHostedPolicy(), loadLatestRelease()]);
   await applyHostedAdmins(policy.admins);
+  await pullHostedKnowledge().catch(() => null);
   return buildUpdateStatus({
     policy,
     source,

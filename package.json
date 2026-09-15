@@ -1,6 +1,6 @@
 {
   "name": "spartan-browser",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -18,7 +18,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/browser/elevated-scripts.test.ts src/lib/browser/knowledge-base.test.ts src/lib/browser/desk-updates.test.ts src/lib/browser/types.test.ts src/lib/browser/windows-identity.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/browser/elevated-scripts.test.ts src/lib/browser/knowledge-base.test.ts src/lib/browser/knowledge-import.test.ts src/lib/browser/desk-reply.test.ts src/lib/browser/desk-updates.test.ts src/lib/browser/types.test.ts src/lib/browser/windows-identity.test.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
     "electron:build": "node scripts/electron-pack.mjs --win"
@@ -58,6 +58,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.0.0",
+    "electron-updater": "^6.8.9",
     "jose": "6.2.9",
     "kysely": "^0.28.5",
     "lucide-react": "^0.510.0",
@@ -73,9 +74,9 @@
     "tailwindcss": "^4.3.0",
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
+    "xlsx": "^0.18.5",
     "zod": "^4.4.0",
-    "zustand": "^5.0.0",
-    "electron-updater": "^6.8.9"
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
