@@ -455,8 +455,8 @@ function ProfilesSection({ setPage }: { setPage: (p: Page) => void }) {
       <Heading title="Profiles" />
       <Subhead>
         {entraUpn
-          ? "This work profile is bound to the Windows / Entra logon on this PC. Switch employee before the next staff member sits down."
-          : "Bind this desk to the Windows / Entra account already logged onto this PC. Google, X, and extra email passwords are not used."}
+          ? "This work profile uses the Windows / Entra account already signed into this PC."
+          : "The installed desk app reads the Windows logon automatically. County sites still complete Entra MFA inside Spartan."}
 
 
       </Subhead>

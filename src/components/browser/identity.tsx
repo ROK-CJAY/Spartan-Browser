@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { ArrowRightLeft, Copy, Monitor } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Monitor } from "lucide-react";
 import { useBrowserStore } from "@/lib/browser/store";
-import { displayNameFromUpn, parseWindowsIdentity, windowsIdentityCommand } from "@/lib/browser/windows-identity";
+import { displayNameFromUpn, parseWindowsIdentity } from "@/lib/browser/windows-identity";
 import { isCountyEmail } from "@/lib/browser/knowledge-base";
+import { isSpartanDesktop, readDesktopWindowsIdentity } from "@/lib/browser/desktop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -21,8 +22,8 @@ export function initialsFrom(name: string) {
 export function SsoCard() {
   const profile = useBrowserStore((s) => s.activeProfile());
   const config = useBrowserStore((s) => s.config);
-  const setConfig = useBrowserStore((s) => s.setConfig);
   const upn = config.entraUpn;
+  const desktop = isSpartanDesktop();
 
   if (!upn) return <GuestSignIn />;
 
@@ -46,26 +47,35 @@ export function SsoCard() {
         </div>
       </div>
       <p className="border-t border-[var(--border)] px-4 py-3 text-[12px] leading-relaxed text-[var(--muted)]">
-        This desk is bound to the Windows logon on this PC ({profile.name}). MyIT, Cloud, and other County apps still
-        prompt for Entra on their own sites.
+        {desktop
+          ? `Signed in as the Windows account on this PC (${profile.name}). County sites still complete Entra MFA on their own pages, inside Spartan.`
+          : `This desk is bound to the Windows logon on this PC (${profile.name}). MyIT, Cloud, and other County apps still prompt for Entra on their own sites.`}
       </p>
-      <button
-        type="button"
-        onClick={() => setConfig({ entraUpn: "", windowsAccount: "" })}
-        className="flex w-full items-center justify-center gap-2 border-t border-[var(--border)] px-4 py-2.5 text-[13px] hover:bg-[var(--btn)]"
-      >
-        <ArrowRightLeft className="size-3.5" />
-        Switch employee
-      </button>
     </div>
   );
 }
 
 export function GuestSignIn() {
   const setConfig = useBrowserStore((s) => s.setConfig);
+  const desktop = isSpartanDesktop();
   const [raw, setRaw] = useState("");
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [waiting, setWaiting] = useState(desktop);
+
+  useEffect(() => {
+    if (!desktop) return;
+    let cancelled = false;
+    void readDesktopWindowsIdentity().then((identity) => {
+      if (cancelled || !identity) {
+        if (!cancelled) setWaiting(false);
+        return;
+      }
+      setConfig({ entraUpn: identity.upn, windowsAccount: identity.account });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [desktop, setConfig]);
 
   function bind(text: string) {
     const parsed = parseWindowsIdentity(text);
@@ -79,7 +89,23 @@ export function GuestSignIn() {
       setError("");
       return;
     }
-    setError("Use this PC’s Entra UPN (name@miamidade.gov), or paste the PowerShell output.");
+    setError("Use this PC’s Entra UPN (name@miamidade.gov).");
+  }
+
+  if (desktop) {
+    return (
+      <div className="overflow-hidden rounded-xl bg-[var(--panel)] p-4">
+        <div className="mb-3 grid size-10 place-items-center rounded-full bg-[var(--btn)] text-[var(--accent)]">
+          <Monitor className="size-4" />
+        </div>
+        <h3 className="text-[15px] font-medium">Windows account</h3>
+        <p className="mt-1 text-[12px] leading-relaxed text-[var(--muted)]">
+          {waiting
+            ? "Reading the Entra account already signed into Windows on this PC…"
+            : "Spartan could not read whoami /upn. Sign into Windows with a County @miamidade.gov account and relaunch."}
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -89,24 +115,13 @@ export function GuestSignIn() {
       </div>
       <h3 className="text-[15px] font-medium">Windows / Entra logon</h3>
       <p className="mt-1 mb-4 text-[12px] leading-relaxed text-[var(--muted)]">
-        Bind this desk to the account already signed into Windows (County Entra ID). There is no Google, X, or extra
-        email password here.
+        This preview is not the installed desk app, so paste the County UPN for this session.
       </p>
       <div className="flex flex-col gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            void navigator.clipboard?.writeText(windowsIdentityCommand()).then(() => setCopied(true));
-          }}
-        >
-          <Copy className="size-4" />
-          {copied ? "Copied whoami command" : "Copy Windows identity command"}
-        </Button>
         <Input
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          placeholder="Paste output, or name@miamidade.gov"
+          placeholder="name@miamidade.gov"
           aria-label="Entra UPN"
           onKeyDown={(e) => {
             if (e.key === "Enter") bind(raw);

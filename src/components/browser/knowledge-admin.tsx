@@ -11,6 +11,7 @@ import {
   type ArticleInput,
 } from "@/lib/browser/knowledge-server";
 import { todayISO, isShippedAdmin, type ArticleCurrency, type KnowledgeArticle } from "@/lib/browser/knowledge-base";
+import { isHostedAdmin } from "@/lib/browser/desk-updates";
 import { useBrowserStore } from "@/lib/browser/store";
 import { GuestSignIn } from "./identity";
 import { Button } from "@/components/ui/button";
@@ -170,18 +171,18 @@ export function KnowledgeAdminPage() {
           </div>
         </header>
 
-        {!access.signedIn ? (
+        {!upn || !access.signedIn ? (
           <div className="space-y-3">
             <GateCard
-              title="Bind this PC's Entra logon"
-              body="Knowledge admins are County Entra accounts (name@miamidade.gov), taken from the Windows logon on this desk. Google, X, and extra email passwords are not used."
+              title="Windows account"
+              body="Knowledge admin uses the Entra account already signed into Windows on this PC. The installed app reads it automatically."
             />
             <GuestSignIn />
           </div>
-        ) : !access.isAdmin ? (
+        ) : !(access.isAdmin || isHostedAdmin(upn) || isShippedAdmin(upn)) ? (
           <GateCard
             title="You are not a Knowledge admin"
-            body={`This PC is bound as ${access.email ?? "this account"}. Knowledge admin is limited to the shipped County list.`}
+            body={`This PC is signed in as ${access.email ?? upn}. Only County UPNs on the Knowledge allow list can train the desk agent.`}
           />
         ) : (
           <>

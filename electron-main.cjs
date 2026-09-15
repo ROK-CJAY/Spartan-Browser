@@ -64,6 +64,35 @@ function waitForServer(url, tries = 80) {
   });
 }
 
+function encodePowerShell(script) {
+  return Buffer.from(script, "utf16le").toString("base64");
+}
+
+const IDENTITY_SCRIPT = `$ErrorActionPreference = 'SilentlyContinue'
+$upn = (whoami /upn | Select-Object -First 1)
+if (-not $upn) {
+  try {
+    $upn = [System.DirectoryServices.AccountManagement.UserPrincipal]::Current.UserPrincipalName
+  } catch {}
+}
+if (-not $upn -and $env:USERNAME) { $upn = $env:USERNAME + '@miamidade.gov' }
+$account = whoami
+Write-Output 'MDC_IDENTITY'
+Write-Output ('UPN=' + $upn)
+Write-Output ('ACCOUNT=' + $account)
+Write-Output ('USER=' + $env:USERNAME)
+Write-Output ('DOMAIN=' + $env:USERDOMAIN)
+`;
+
+function parseIdentity(raw) {
+  const text = String(raw || "").trim();
+  const upnLine = text.match(/(?:^|\n)\s*UPN=([^\r\n]+)/i);
+  const accountLine = text.match(/(?:^|\n)\s*ACCOUNT=([^\r\n]+)/i);
+  const upn = (upnLine?.[1] || text).trim().toLowerCase();
+  if (!upn.includes("@miamidade.gov")) return null;
+  return { upn, account: (accountLine?.[1] || "").trim() };
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -77,40 +106,64 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webviewTag: true,
+      partition: "persist:spartan",
     },
   });
   win.loadURL(`http://127.0.0.1:${PORT}/`);
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http")) shell.openExternal(url);
+}
+
+function keepInsideSpartan(url) {
+  if (!url || url === "about:blank") return { action: "deny" };
+  if (url.startsWith("mailto:") || url.startsWith("tel:")) {
+    shell.openExternal(url);
     return { action: "deny" };
-  });
+  }
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send("open-new-tab", url);
+  }
+  return { action: "deny" };
 }
 
 ipcMain.handle("app-version", () => app.getVersion());
 ipcMain.handle("check-for-updates", async () => {
   try {
     const result = await autoUpdater.checkForUpdates();
-    return {
-      ok: true,
-      version: result?.updateInfo?.version ?? null,
-    };
+    return { ok: true, version: result?.updateInfo?.version ?? null };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
-ipcMain.handle("windows-upn", () => {
+ipcMain.handle("windows-identity", () => {
   return new Promise((resolve) => {
-    const child = spawn("whoami", ["/upn"], { windowsHide: true });
+    const child = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(IDENTITY_SCRIPT)],
+      { windowsHide: true },
+    );
     let out = "";
     child.stdout.on("data", (chunk) => {
       out += chunk.toString();
     });
-    child.on("close", () => resolve(out.trim().toLowerCase()));
-    child.on("error", () => resolve(""));
+    child.on("close", () => resolve(parseIdentity(out)));
+    child.on("error", () => resolve(null));
+  });
+});
+
+app.on("web-contents-created", (_event, contents) => {
+  contents.setWindowOpenHandler(({ url }) => keepInsideSpartan(url));
+  contents.on("will-navigate", (event, url) => {
+    if (contents.getType() !== "window") return;
+    if (url.startsWith(`http://127.0.0.1:${PORT}`)) return;
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      event.preventDefault();
+      keepInsideSpartan(url);
+    }
   });
 });
 
 app.whenReady().then(async () => {
+  session.fromPartition("persist:spartan");
   startServer();
   await waitForServer(`http://127.0.0.1:${PORT}/`);
   createWindow();

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bookmark,
+  BookOpen,
   Calculator,
   ChevronDown,
   ChevronLeft,
@@ -34,6 +35,7 @@ import { DeleteDataDialog } from "./delete-data";
 import { Favicon } from "./favicon";
 import { WorkspaceHome } from "./home";
 import { KnowledgeAdminPage } from "./knowledge-admin";
+import { DesktopWebview } from "./desktop-webview";
 import { RailAvatar, SsoCard, AccountChip } from "./identity";
 import { SecureLaunch } from "./launch";
 import { VaultChip } from "./password-vault";
@@ -63,7 +65,8 @@ import {
   type PanelId,
 } from "@/lib/browser/types";
 import { checkDeskUpdates } from "@/lib/browser/desk-updates-server";
-import { type DeskUpdateStatus } from "@/lib/browser/desk-updates";
+import { isHostedAdmin, type DeskUpdateStatus } from "@/lib/browser/desk-updates";
+import { isSpartanDesktop, readDesktopWindowsIdentity } from "@/lib/browser/desktop";
 import { expiryState, loginForTool } from "@/lib/browser/vault-crypto";
 import { cn } from "@/lib/utils";
 
@@ -167,6 +170,26 @@ export function BrowserApp() {
     window.addEventListener("pagehide", onHide);
     return () => window.removeEventListener("pagehide", onHide);
   }, [applyClearOnClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readDesktopWindowsIdentity().then((identity) => {
+      if (cancelled || !identity) return;
+      useBrowserStore.getState().setConfig({
+        entraUpn: identity.upn,
+        windowsAccount: identity.account,
+      });
+    });
+    const stop = window.spartanDesktop?.onOpenTab((url) => {
+      const store = useBrowserStore.getState();
+      if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) return;
+      store.newTab(url);
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
 
   return (
     <Chrome
@@ -806,6 +829,9 @@ function Rail({
   onKiosk: () => void;
 }) {
   const goHome = useBrowserStore((s) => s.goHome);
+  const navigate = useBrowserStore((s) => s.navigate);
+  const upn = useBrowserStore((s) => s.config.entraUpn);
+  const knowledgeAdmin = isHostedAdmin(upn);
   return (
     <nav
       className="z-30 flex h-full shrink-0 flex-col items-center gap-1 border-r border-[var(--border)] bg-[var(--rail)] py-2"
@@ -845,6 +871,19 @@ function Rail({
           </button>
         );
       })}
+      <button
+        type="button"
+        title={knowledgeAdmin ? "Knowledge admin" : "Knowledge"}
+        onClick={() => navigate(KNOWLEDGE_URL, "Knowledge")}
+        className={cn(
+          "grid size-11 place-items-center rounded-xl",
+          knowledgeAdmin
+            ? "text-[var(--accent)] hover:bg-[var(--btn)]"
+            : "text-[var(--muted)] hover:bg-[var(--btn)] hover:text-[var(--fg)]",
+        )}
+      >
+        <BookOpen className="size-5" />
+      </button>
       <div className="flex-1" />
       <button
         type="button"
@@ -1170,6 +1209,9 @@ function PageView({ url, title, reloadKey }: { url: string; title: string; reloa
   if (url === HISTORY_URL) return <HistoryPage />;
   if (url === DOWNLOADS_URL) return <DownloadsPage />;
   if (url === FAVORITES_URL) return <FavoritesPage />;
+  if (isSpartanDesktop() && /^https?:/i.test(url)) {
+    return <DesktopWebview url={url} title={title} reloadKey={reloadKey} />;
+  }
   if (requiresSecureLaunch(url)) return <SecureLaunch url={url} title={title} />;
   return (
     <iframe
@@ -1177,7 +1219,7 @@ function PageView({ url, title, reloadKey }: { url: string; title: string; reloa
       title={title || displayTitle(url)}
       src={url}
       className="h-full w-full border-0 bg-white"
-      sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
+      sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-downloads"
       referrerPolicy="no-referrer-when-downgrade"
     />
   );

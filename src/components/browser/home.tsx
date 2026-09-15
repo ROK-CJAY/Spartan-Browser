@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { askDeskAgent, type DeskAgentArticle, type DeskAgentResult } from "@/lib/browser/desk-agent";
 import { DESK_AGENT_SUGGESTIONS, featuredArticles, retrieveArticles } from "@/lib/browser/knowledge-base";
+import { isHostedAdmin } from "@/lib/browser/desk-updates";
 import { getKnowledgeAccess, listPublishedKnowledge } from "@/lib/browser/knowledge-server";
 import { displayNameFromUpn } from "@/lib/browser/windows-identity";
 import { useBrowserStore } from "@/lib/browser/store";
@@ -48,7 +49,8 @@ export function WorkspaceHome() {
   const [result, setResult] = useState<DeskAgentResult | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [featured, setFeatured] = useState(() => featuredArticles());
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(() => isHostedAdmin(upn));
+
   const agentRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -56,8 +58,9 @@ export function WorkspaceHome() {
       .then((articles) => setFeatured(articles.filter((article) => article.featured).slice(0, 6)))
       .catch(() => setFeatured(featuredArticles()));
     void getKnowledgeAccess({ data: { upn } })
-      .then((access) => setIsAdmin(access.isAdmin))
-      .catch(() => setIsAdmin(false));
+      .then((access) => setIsAdmin(access.isAdmin || isHostedAdmin(upn)))
+      .catch(() => setIsAdmin(isHostedAdmin(upn)));
+
   }, [upn]);
 
   async function ask(raw?: string) {
