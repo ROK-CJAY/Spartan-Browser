@@ -126,14 +126,6 @@ function keepInsideSpartan(url) {
 }
 
 ipcMain.handle("app-version", () => app.getVersion());
-ipcMain.handle("check-for-updates", async () => {
-  try {
-    const result = await autoUpdater.checkForUpdates();
-    return { ok: true, version: result?.updateInfo?.version ?? null };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-});
 ipcMain.handle("windows-identity", () => {
   return new Promise((resolve) => {
     const child = spawn(
@@ -148,6 +140,95 @@ ipcMain.handle("windows-identity", () => {
     child.on("close", () => resolve(parseIdentity(out)));
     child.on("error", () => resolve(null));
   });
+});
+
+const updateState = {
+  phase: "idle",
+  currentVersion: "",
+  latestVersion: null,
+  percent: 0,
+  error: null,
+};
+
+function snapshotUpdate() {
+  return {
+    ...updateState,
+    currentVersion: app.isReady() ? app.getVersion() : updateState.currentVersion,
+    packaged: app.isPackaged,
+  };
+}
+
+function broadcastUpdate() {
+  const payload = snapshotUpdate();
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send("updater:status", payload);
+  }
+}
+
+function setupUpdater() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("checking-for-update", () => {
+    updateState.phase = "checking";
+    updateState.error = null;
+    broadcastUpdate();
+  });
+  autoUpdater.on("update-available", (info) => {
+    updateState.phase = "available";
+    updateState.latestVersion = info?.version ?? null;
+    updateState.error = null;
+    broadcastUpdate();
+  });
+  autoUpdater.on("update-not-available", (info) => {
+    updateState.phase = "current";
+    updateState.latestVersion = info?.version ?? app.getVersion();
+    updateState.percent = 0;
+    updateState.error = null;
+    broadcastUpdate();
+  });
+  autoUpdater.on("download-progress", (progress) => {
+    updateState.phase = "downloading";
+    updateState.percent = Math.max(0, Math.min(100, Math.round(progress?.percent || 0)));
+    broadcastUpdate();
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    updateState.phase = "ready";
+    updateState.latestVersion = info?.version ?? updateState.latestVersion;
+    updateState.percent = 100;
+    updateState.error = null;
+    broadcastUpdate();
+  });
+  autoUpdater.on("error", (err) => {
+    updateState.phase = "error";
+    updateState.error = err instanceof Error ? err.message : String(err);
+    broadcastUpdate();
+  });
+}
+
+ipcMain.handle("updater:get", () => snapshotUpdate());
+ipcMain.handle("updater:check", async () => {
+  if (!app.isPackaged) {
+    updateState.phase = "error";
+    updateState.error = "Install Spartan Browser to receive desktop updates.";
+    broadcastUpdate();
+    return snapshotUpdate();
+  }
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (err) {
+    updateState.phase = "error";
+    updateState.error = err instanceof Error ? err.message : String(err);
+    broadcastUpdate();
+  }
+  return snapshotUpdate();
+});
+ipcMain.handle("updater:install", () => {
+  if (updateState.phase !== "ready") return { ok: false };
+  if (serverProc && !serverProc.killed) serverProc.kill();
+  setTimeout(() => {
+    autoUpdater.quitAndInstall(false, true);
+  }, 200);
+  return { ok: true };
 });
 
 app.on("web-contents-created", (_event, contents) => {
@@ -167,10 +248,14 @@ app.whenReady().then(async () => {
   startServer();
   await waitForServer(`http://127.0.0.1:${PORT}/`);
   createWindow();
-  autoUpdater.autoDownload = true;
-  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-    console.warn("updater", err);
-  });
+  setupUpdater();
+  if (app.isPackaged) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.warn("updater", err);
+      });
+    }, 4000);
+  }
   globalShortcut.register("CommandOrControl+T", () => {
     BrowserWindow.getFocusedWindow()?.webContents.send("shortcut:new-tab");
   });

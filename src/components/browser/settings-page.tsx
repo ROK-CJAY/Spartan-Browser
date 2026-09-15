@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Accessibility,
   Briefcase,
@@ -54,7 +54,15 @@ import { cn } from "@/lib/utils";
 import { SsoCard } from "./identity";
 import { PasswordsSection } from "./password-vault";
 import { checkDeskUpdates } from "@/lib/browser/desk-updates-server";
-import { APP_VERSION, HDB_REPO, type DeskUpdateStatus } from "@/lib/browser/desk-updates";
+import { APP_VERSION, type DeskUpdateStatus } from "@/lib/browser/desk-updates";
+import {
+  checkDesktopUpdates,
+  installDesktopUpdate,
+  isSpartanDesktop,
+  readDesktopUpdateStatus,
+  subscribeDesktopUpdates,
+} from "@/lib/browser/desktop";
+import type { DesktopUpdateStatus } from "@/types/spartan-desktop";
 
 type Lucide = typeof User;
 
@@ -1238,9 +1246,19 @@ function ExtensionsSection() {
 }
 
 function AboutSection() {
+  const desktop = isSpartanDesktop();
   const [status, setStatus] = useState<DeskUpdateStatus | null>(null);
+  const [installer, setInstaller] = useState<DesktopUpdateStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!desktop) return;
+    void readDesktopUpdateStatus().then((next) => {
+      if (next) setInstaller(next);
+    });
+    return subscribeDesktopUpdates((next) => setInstaller(next));
+  }, [desktop]);
 
   async function check() {
     setBusy(true);
@@ -1248,6 +1266,10 @@ function AboutSection() {
     try {
       const next = await checkDeskUpdates();
       setStatus(next);
+      if (desktop) {
+        const update = await checkDesktopUpdates();
+        if (update) setInstaller(update);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reach GitHub.");
     } finally {
@@ -1255,12 +1277,22 @@ function AboutSection() {
     }
   }
 
+  async function restartAndUpdate() {
+    setError("");
+    const result = await installDesktopUpdate();
+    if (!result.ok) setError("The update is still downloading. Try Check for updates again.");
+  }
+
+  const installerBusy = installer?.phase === "checking" || installer?.phase === "downloading";
+  const ready = installer?.phase === "ready";
+
   return (
     <>
       <Heading title="About this browser" />
       <Subhead>
-        Desks check GitHub ({HDB_REPO}) for a newer Windows installer and for Knowledge admin UPNs in
-        policy/desk-policy.json. Tag v0.9.0 (or later) on that repo to publish SpartanBrowser-Setup.
+        {desktop
+          ? "Check GitHub Releases for a newer Spartan Browser. When it finishes downloading, restart here to install it."
+          : "Check GitHub Releases for a newer Windows installer. Policy for Knowledge admins refreshes at the same time."}
       </Subhead>
       <Group>
         <div className="flex items-start gap-3 px-4 py-4">
@@ -1268,9 +1300,9 @@ function AboutSection() {
             <Building2 className="size-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-medium">MDC Help Desk Browser</p>
+            <p className="text-[14px] font-medium">Spartan Browser</p>
             <p className="text-[13px] text-[var(--muted)]">
-              Version {APP_VERSION} · Miami-Dade County IT Service Center
+              Version {installer?.currentVersion || APP_VERSION} · Miami-Dade County IT Service Center
             </p>
             <p className="mt-2 text-[13px] text-[var(--muted)]">Managed by your organization. Some settings are locked.</p>
           </div>
@@ -1279,11 +1311,20 @@ function AboutSection() {
       <Group>
         <div className="space-y-3 px-4 py-4 text-[13px]">
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" disabled={busy} onClick={() => void check()}>
-              <RefreshCw className={cn("mr-2 size-4", busy && "animate-spin")} />
-              {busy ? "Checking…" : "Check now"}
+            <Button type="button" disabled={busy || installerBusy} onClick={() => void check()}>
+              <RefreshCw className={cn("mr-2 size-4", (busy || installerBusy) && "animate-spin")} />
+              {busy || installer?.phase === "checking"
+                ? "Checking…"
+                : installer?.phase === "downloading"
+                  ? `Downloading ${installer.percent}%`
+                  : "Check for updates"}
             </Button>
-            {status?.updateAvailable ? (
+            {ready ? (
+              <Button type="button" onClick={() => void restartAndUpdate()}>
+                Restart and update
+              </Button>
+            ) : null}
+            {!desktop && status?.updateAvailable && status.releaseUrl ? (
               <Button
                 type="button"
                 variant="outline"
@@ -1296,31 +1337,35 @@ function AboutSection() {
             ) : null}
           </div>
           {error ? <p className="text-red-400">{error}</p> : null}
-          {status ? (
-            <div className="space-y-1 text-[var(--muted)]">
+          {installer?.error ? <p className="text-red-400">{installer.error}</p> : null}
+          <div className="space-y-1 text-[var(--muted)]">
+            {installer ? (
               <p>
-                Channel: {status.source === "github" ? "GitHub" : status.source === "fallback" ? "shipped file" : "offline fallback"}
-                {status.latestVersion ? ` · latest ${status.latestVersion}` : " · no GitHub release yet"}
+                {installer.phase === "ready"
+                  ? `Version ${installer.latestVersion} is downloaded. Restart Spartan Browser to finish installing.`
+                  : installer.phase === "downloading"
+                    ? `Downloading version ${installer.latestVersion} (${installer.percent}%). Keep the app open.`
+                    : installer.phase === "available"
+                      ? `Version ${installer.latestVersion} is available and will download automatically.`
+                      : installer.phase === "current"
+                        ? "This desk is on the current version."
+                        : installer.phase === "checking"
+                          ? "Checking GitHub Releases…"
+                          : installer.phase === "error"
+                            ? "Could not check for a desktop update. Try again, or install the Setup file from GitHub Releases."
+                            : "Check for updates to see if a newer installer is on GitHub."}
               </p>
-              <p>Last checked {new Date(status.checkedAt).toLocaleString()}</p>
+            ) : status ? (
               <p>
                 {status.updateAvailable
-                  ? "A newer Spartan Browser installer is on GitHub Releases. Open the release, run the Setup .exe, then relaunch."
+                  ? `Version ${status.latestVersion} is on GitHub Releases (this desk is ${status.currentVersion}).`
                   : "This desk is on the current shipped version."}
               </p>
-              <p className="pt-2 font-medium text-[var(--fg)]">Knowledge admins from policy</p>
-              <ul className="list-inside list-disc">
-                {status.policy.admins.map((email) => (
-                  <li key={email}>{email}</li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-[var(--muted)]">
-              Check now to pull the admin list from GitHub. If GitHub is blocked, this desk keeps the three shipped
-              County UPNs.
-            </p>
-          )}
+            ) : (
+              <p>Check for updates to look for a newer Spartan Browser on GitHub Releases.</p>
+            )}
+            {status ? <p>Policy last checked {new Date(status.checkedAt).toLocaleString()}</p> : null}
+          </div>
         </div>
       </Group>
     </>

@@ -66,7 +66,8 @@ import {
 } from "@/lib/browser/types";
 import { checkDeskUpdates } from "@/lib/browser/desk-updates-server";
 import { isHostedAdmin, type DeskUpdateStatus } from "@/lib/browser/desk-updates";
-import { isSpartanDesktop, readDesktopWindowsIdentity } from "@/lib/browser/desktop";
+import { isSpartanDesktop, installDesktopUpdate, readDesktopUpdateStatus, readDesktopWindowsIdentity, subscribeDesktopUpdates } from "@/lib/browser/desktop";
+import type { DesktopUpdateStatus } from "@/types/spartan-desktop";
 import { expiryState, loginForTool } from "@/lib/browser/vault-crypto";
 import { cn } from "@/lib/utils";
 
@@ -249,6 +250,8 @@ function Chrome({
   const [reloadKey, setReloadKey] = useState(0);
   const [mobilePanel, setMobilePanel] = useState(false);
   const [deskUpdate, setDeskUpdate] = useState<DeskUpdateStatus | null>(null);
+  const [installer, setInstaller] = useState<DesktopUpdateStatus | null>(null);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -266,6 +269,14 @@ function Chrome({
       cancelled = true;
       window.clearInterval(id);
     };
+  }, []);
+
+  useEffect(() => {
+    if (!isSpartanDesktop()) return;
+    void readDesktopUpdateStatus().then((next) => {
+      if (next) setInstaller(next);
+    });
+    return subscribeDesktopUpdates((next) => setInstaller(next));
   }, []);
 
   useEffect(() => {
@@ -533,7 +544,34 @@ function Chrome({
           className="relative z-40 flex shrink-0 flex-col border-b border-[var(--border)] bg-[var(--top)]"
           style={{ minHeight: topHeight }}
         >
-          {deskUpdate?.updateAvailable ? (
+          {installer?.phase === "ready" || installer?.phase === "downloading" || installer?.phase === "available" ? (
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-xs">
+              <span>
+                {installer.phase === "ready"
+                  ? `Spartan Browser ${installer.latestVersion} is downloaded.`
+                  : installer.phase === "downloading"
+                    ? `Downloading Spartan Browser ${installer.latestVersion} (${installer.percent}%)…`
+                    : `Spartan Browser ${installer.latestVersion} is available.`}
+              </span>
+              {installer.phase === "ready" ? (
+                <button
+                  type="button"
+                  className="rounded-md bg-[var(--accent)] px-2 py-1 font-medium text-[var(--accent-fg)]"
+                  onClick={() => void installDesktopUpdate()}
+                >
+                  Restart and update
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="rounded-md px-2 py-1 font-medium hover:bg-[var(--btn)]"
+                  onClick={() => openSettings("about")}
+                >
+                  View progress
+                </button>
+              )}
+            </div>
+          ) : deskUpdate?.updateAvailable && !isSpartanDesktop() ? (
             <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-xs">
               <span>
                 Version {deskUpdate.latestVersion} is on GitHub Releases (this desk is {deskUpdate.currentVersion}).
