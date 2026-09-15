@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "IBM Plex Serif", "IBM Plex Sans", ui-serif, serif;
+  --color-bg: #0b0d10;
+  --color-fg: #e8eef2;
+  --color-muted: #8b96a3;
+  --color-primary: #1a8fb8;
+  --radius: 0.75rem;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --motion-quick: 150ms;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :root {
+    --bg: #0b0d10;
+    --rail: #101318;
+    --panel: #161b22;
+    --top: #12161c;
+    --accent: #1a8fb8;
+    --accent-fg: #0b0d10;
+    --fg: #e8eef2;
+    --muted: #8b96a3;
+    --btn: #1c222b;
+    --addr: #1a2028;
+    --border: color-mix(in oklab, var(--fg) 12%, transparent);
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --motion-quick: 150ms;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}

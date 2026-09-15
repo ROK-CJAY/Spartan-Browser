@@ -1,0 +1,417 @@
+export type ArticleCurrency = "current" | "review" | "outdated";
+
+export type KnowledgeArticle = {
+  id: string;
+  title: string;
+  summary: string;
+  steps: string[];
+  keywords: string[];
+  lastReviewed: string;
+  currency: ArticleCurrency;
+  featured?: boolean;
+  supersedes?: string[];
+  staleNote?: string;
+  expiresOn?: string | null;
+  retired?: boolean;
+};
+
+export const COUNTY_EMAIL_DOMAIN = "miamidade.gov";
+
+/** Same on every desk. Binding Windows does not grant admin. */
+export const SEEDED_KNOWLEDGE_ADMINS = [
+  "e315170@miamidade.gov",
+  "e325037@miamidade.gov",
+  "e310678@miamidade.gov",
+] as const;
+
+export function isShippedAdmin(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return (SEEDED_KNOWLEDGE_ADMINS as readonly string[]).includes(normalizeEmail(email));
+}
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function isCountyEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const value = normalizeEmail(email);
+  return value.endsWith(`@${COUNTY_EMAIL_DOMAIN}`) && value.split("@")[0]!.length > 0;
+}
+
+export function todayISO(now = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+export function applyLifecycle(article: KnowledgeArticle, today = todayISO()): KnowledgeArticle | null {
+  if (article.retired) return null;
+  if (article.expiresOn && article.expiresOn <= today) {
+    return {
+      ...article,
+      currency: "outdated",
+      staleNote:
+        article.staleNote ||
+        `This article expired on ${article.expiresOn}. Confirm with a Knowledge admin before quoting.`,
+    };
+  }
+  return article;
+}
+
+export function publishedArticles(pool: KnowledgeArticle[] = KNOWLEDGE_ARTICLES, today = todayISO()): KnowledgeArticle[] {
+  return pool.map((article) => applyLifecycle(article, today)).filter((article): article is KnowledgeArticle => Boolean(article));
+}
+
+export const KNOWLEDGE_ARTICLES: KnowledgeArticle[] = [
+  {
+    id: "KM0001842",
+    title: "Password and MFA reset",
+    summary: "Reset a County Entra ID password and re-register Microsoft Authenticator from MyIT.",
+    lastReviewed: "2026-07-14",
+    currency: "current",
+    featured: true,
+    supersedes: ["KM0000911"],
+    keywords: ["password", "mfa", "authenticator", "azure", "entra", "sspr", "reset", "lockout"],
+    steps: [
+      "Confirm the caller with name, employee ID, and department before changing credentials.",
+      "Open MyIT (myit.miamidade.gov) → Reset password. Do not send them to the retired SSPR site.",
+      "After the password change, have them sign in at office.com and complete Authenticator registration if prompted.",
+      "If Authenticator is lost, use Entra ID → Authentication methods to delete the old method, then walk them through a new registration.",
+      "If they are locked out of both password and phone, unlock in Active Directory first (KM0001755), then reset MFA.",
+    ],
+  },
+  {
+    id: "KM0000911",
+    title: "Self-Service Password Reset portal",
+    summary: "Legacy SSPR instructions pointing at sspr.miamidade.gov.",
+    lastReviewed: "2021-03-09",
+    currency: "outdated",
+    staleNote: "SSPR portal was decommissioned. Use MyIT password reset (KM0001842).",
+    keywords: ["password", "sspr", "reset", "self-service"],
+    steps: [
+      "Send the user to https://sspr.miamidade.gov (retired).",
+      "They answer security questions set at hire.",
+      "Temporary password is emailed to the manager.",
+    ],
+  },
+  {
+    id: "KM0002104",
+    title: "Microsoft Authenticator enrollment",
+    summary: "Register or replace Authenticator as the County MFA method.",
+    lastReviewed: "2026-06-02",
+    currency: "current",
+    keywords: ["mfa", "authenticator", "enrollment", "new hire", "phone", "push"],
+    steps: [
+      "User needs a smartphone and their current County password.",
+      "Sign in at aka.ms/mfasetup or the Office 365 prompt.",
+      "Choose Microsoft Authenticator (not SMS) unless a director exception is on file.",
+      "Scan the QR code, approve the test push, then store the recovery codes in the vault if they are a desk account.",
+    ],
+  },
+  {
+    id: "KM0001560",
+    title: "Citrix Cloud desktop",
+    summary: "Launch the County VDI from cloud.miamidade.gov with Citrix Workspace.",
+    lastReviewed: "2026-08-21",
+    currency: "current",
+    featured: true,
+    supersedes: ["KM0000722"],
+    keywords: ["citrix", "cloud", "vdi", "workspace", "desktop", "xenapp", "ica"],
+    steps: [
+      "Go to https://cloud.miamidade.gov (not StoreFront).",
+      "Sign in with County Entra ID. First launch installs or updates Citrix Workspace.",
+      "Open the assigned desktop (standard or elevated image). Allow clipboard and file-transfer prompts.",
+      "If the session is stuck on 'Connecting', clear Workspace cache or use the HTML5 receiver from the portal as a workaround.",
+      "Resource issues (no desktop entitled) go to Citrix Manager / NSD, not a password reset.",
+    ],
+  },
+  {
+    id: "KM0000722",
+    title: "Citrix StoreFront on-prem",
+    summary: "Launch published apps from the retired StoreFront URL.",
+    lastReviewed: "2019-11-18",
+    currency: "outdated",
+    staleNote: "On-prem StoreFront is retired. Direct callers to Citrix Cloud (KM0001560).",
+    keywords: ["citrix", "storefront", "xenapp", "published apps"],
+    steps: [
+      "Browse to https://storefront.miamidade.gov and install Receiver 4.x.",
+      "Use COUNTY\\username (not the email UPN).",
+    ],
+  },
+  {
+    id: "KM0001888",
+    title: "INFORMS time and pay",
+    summary: "PeopleSoft INFORMS employee self-service for time, pay, and W-2.",
+    lastReviewed: "2026-05-11",
+    currency: "current",
+    featured: true,
+    supersedes: ["KM0000440"],
+    keywords: ["informs", "peoplesoft", "time", "pay", "timesheet", "w2", "ess", "hrms"],
+    steps: [
+      "Open https://informs.miamidade.gov and sign in with Entra ID.",
+      "Time entry: Employee Self Service → Time → Timesheet. Save, then Submit for manager approval.",
+      "Missing paycheck or W-2: Payroll tile. Do not create a SmartIT hardware ticket.",
+      "If INFORMS shows no job row, check Query Viewer MD_HELPDESK_ID_SEARCH and escalate to HRIS, not desktop support.",
+    ],
+  },
+  {
+    id: "KM0000440",
+    title: "PeopleSoft Employee Self Service",
+    summary: "Pre-INFORMS ESS on the old HRPRD farm.",
+    lastReviewed: "2020-01-22",
+    currency: "outdated",
+    staleNote: "HRPRD ESS was replaced by INFORMS. Use KM0001888.",
+    keywords: ["peoplesoft", "ess", "time", "pay", "hrprd"],
+    steps: [
+      "Sign in to HRPRD Employee Self Service with COUNTY credentials.",
+      "Use Internet Explorer 11; Chrome is unsupported.",
+    ],
+  },
+  {
+    id: "KM0002011",
+    title: "Printer mapping and follow-me print",
+    summary: "Map County follow-me queues and local department printers.",
+    lastReviewed: "2026-04-03",
+    currency: "current",
+    featured: true,
+    keywords: ["printer", "print", "follow-me", "queue", "toner", "hardware"],
+    steps: [
+      "On a County image: Start → Printers → FollowMe-Color or FollowMe-BW. Badge at the device to release.",
+      "Department printers: NSD Network Tools or the printer host on the ticket. Map by \\\\print\\queue.",
+      "Citrix sessions need the queue published on the Cloud image; mapping it only on the thin client will not stick.",
+      "Toner, jams, and offline devices: hardware dispatch (KM0000555), not a new AD account.",
+    ],
+  },
+  {
+    id: "KM0000633",
+    title: "Cisco IP phone and telephony",
+    summary: "Reset, reregister, and voicemail PIN for Cisco desk phones.",
+    lastReviewed: "2024-09-16",
+    currency: "review",
+    staleNote: "CUCM version and voicemail URLs should be confirmed with Voice before quoting them.",
+    keywords: ["phone", "telephony", "cisco", "voip", "voicemail", "jabber", "extension"],
+    steps: [
+      "Ask for the extension and MAC from the phone menu (Settings → Phone Information).",
+      "Soft reset: Settings → Admin Settings → Reset → Reset Device. Hard reset only if Voice authorizes it.",
+      "Voicemail PIN resets are done in Unity; do not reuse the network password.",
+      "Jabber / Webex Calling migration status varies by department — check with Voice before promising a desk phone replacement.",
+    ],
+  },
+  {
+    id: "KM0001755",
+    title: "Account lockout and AD unlock",
+    summary: "Unlock a COUNTY domain account without resetting the password.",
+    lastReviewed: "2026-07-01",
+    currency: "current",
+    keywords: ["lockout", "locked", "ad", "active directory", "unlock", "bad password"],
+    steps: [
+      "Identify the user in Active Directory Users and Computers or NSD Active Directory Search.",
+      "If the account is locked, unlock it. Do not check 'Password never expires'.",
+      "Ask where they typed the password (Citrix, INFORMS, Wi-Fi, Outlook). Multiple failures can relock in minutes.",
+      "If they forgot the password, continue with KM0001842. Unlock alone will not help.",
+      "Service accounts and shared mailboxes: escalate; do not unlock from the Help Desk runbook.",
+    ],
+  },
+  {
+    id: "KM0001420",
+    title: "Outlook and Exchange Online",
+    summary: "Mailbox access, Outlook profile rebuild, and cached mode issues.",
+    lastReviewed: "2026-06-20",
+    currency: "current",
+    keywords: ["outlook", "email", "exchange", "mailbox", "o365", "office"],
+    steps: [
+      "Web: https://outlook.office.com with Entra ID. Confirm they can open mail in the browser before rebuilding a profile.",
+      "Desktop Outlook: File → Account Settings. If the profile is corrupt, create a new one; do not delete the OST first unless cached mode is the complaint.",
+      "Missing shared mailbox: KM0001212. Missing archive: check litigation hold with Messaging, not a local repair.",
+      "Citrix Outlook is the Cloud image copy — local Office repair will not fix a Cloud session.",
+    ],
+  },
+  {
+    id: "KM0000888",
+    title: "County VPN client",
+    summary: "Install and connect the legacy Cisco AnyConnect VPN.",
+    lastReviewed: "2022-02-14",
+    currency: "outdated",
+    staleNote: "Remote access moved to Citrix Cloud and Always On. Do not send callers to the old VPN portal.",
+    keywords: ["vpn", "anyconnect", "remote", "cisco vpn", "off network"],
+    steps: [
+      "Download AnyConnect from vpn.miamidade.gov and connect to COUNTY-VPN.",
+      "Use COUNTY\\username. MFA is a phone callback.",
+    ],
+  },
+  {
+    id: "KM0001933",
+    title: "Webex Contact Center widget",
+    summary: "Sign in to the Help Desk Webex Contact Center agent widget.",
+    lastReviewed: "2026-03-28",
+    currency: "current",
+    keywords: ["webex", "contact center", "wxcc", "phone queue", "widget", "agent"],
+    steps: [
+      "Open the saved Webex bookmark (desktop.wxcc-us1.cisco.com) or the Help Desk SharePoint link.",
+      "Sign in with County SSO. Set state to Available only after MyIT is open.",
+      "If the widget is blank, allow third-party cookies for cisco.com and reload. Do not embed it in an unsupported browser.",
+      "Audio issues: check the headset in Windows sound settings, then Webex device selection — not a Citrix restart.",
+    ],
+  },
+  {
+    id: "KM0001666",
+    title: "Logging tickets in MyIT and SmartIT",
+    summary: "When to use MyIT versus SmartIT Smart Recorder.",
+    lastReviewed: "2026-08-01",
+    currency: "current",
+    keywords: ["myit", "smartit", "ticket", "incident", "request", "remedy", "bmc"],
+    steps: [
+      "End users and simple requests: MyIT (myit.miamidade.gov) so they can watch status.",
+      "Help Desk live calls: SmartIT Smart Recorder. Capture caller, asset tag, error text, and what already failed.",
+      "Do not open both a MyIT request and a SmartIT incident for the same call unless you are transferring to a resolver group.",
+      "Password resets and MFA do not need a ticket unless the unlock fails or a manager asks for an audit trail.",
+    ],
+  },
+  {
+    id: "KM0000555",
+    title: "Hardware dispatch",
+    summary: "Break/fix for printers, desktops, and monitors.",
+    lastReviewed: "2024-11-02",
+    currency: "review",
+    staleNote: "Vendor and warehouse contacts change; confirm the current dispatch queue in SmartIT.",
+    keywords: ["hardware", "dispatch", "desktop", "monitor", "broken", "replacement", "asset"],
+    steps: [
+      "Collect asset tag, building, floor, and a callback number.",
+      "Log a SmartIT incident in the Hardware / Dispatch queue. Attach a photo if the panel is damaged.",
+      "Loaner equipment is warehouse-only — do not promise a same-day PC from the desk.",
+    ],
+  },
+  {
+    id: "KM0001777",
+    title: "Entra ID guest and contractor accounts",
+    summary: "Sponsor a guest account or convert a contractor to a County identity.",
+    lastReviewed: "2026-02-18",
+    currency: "current",
+    keywords: ["entra", "guest", "contractor", "b2b", "external", "sponsor"],
+    steps: [
+      "Guests: Entra ID → Users → Invite. Sponsor must be a County employee. Guests do not get Citrix or INFORMS.",
+      "Contractors who need a desktop: HR / EPAR first, then AD, then Entra. Do not invite them as B2B guests for VDI.",
+      "Access reviews expire; a 'user not found' on a guest is often an expired invite, not a password issue.",
+    ],
+  },
+  {
+    id: "KM0001212",
+    title: "Shared mailbox access",
+    summary: "Add a user to a shared Exchange mailbox.",
+    lastReviewed: "2026-01-09",
+    currency: "current",
+    keywords: ["shared mailbox", "mailbox", "delegate", "outlook", "exchange"],
+    steps: [
+      "Confirm the mailbox address and that the requester's manager approved access.",
+      "Grant Full Access (and Send As if they need to reply as the mailbox) in Exchange Admin or the Messaging request form.",
+      "Outlook may take up to an hour to auto-map. They can open it immediately in outlook.office.com via Open another mailbox.",
+      "Do not share a personal mailbox password. Convert to a shared mailbox if that is the current workaround.",
+    ],
+  },
+  {
+    id: "KM0000990",
+    title: "CountySecure Wi-Fi",
+    summary: "Join CountySecure with domain credentials.",
+    lastReviewed: "2024-06-12",
+    currency: "review",
+    staleNote: "SSID and certificate profiles differ on newer images; confirm with Network if onboarding fails after a password change.",
+    keywords: ["wifi", "wi-fi", "wireless", "countysecure", "network", "ssid"],
+    steps: [
+      "SSID CountySecure, EAP method PEAP / MSCHAPv2, user COUNTY\\username.",
+      "After a password reset, forget the network and rejoin or the NIC will keep failing and relock the account.",
+      "Guest / visitor wireless is a separate SSID and must not use County credentials.",
+    ],
+  },
+];
+
+const STOP = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "how",
+  "what",
+  "when",
+  "from",
+  "that",
+  "this",
+  "are",
+  "was",
+  "can",
+  "not",
+  "user",
+  "help",
+  "desk",
+  "please",
+  "issue",
+  "problem",
+  "need",
+  "know",
+]);
+
+export function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 1 && !STOP.has(t));
+}
+
+export function retrieveArticles(
+  query: string,
+  limit = 5,
+  pool: KnowledgeArticle[] = KNOWLEDGE_ARTICLES,
+  today = todayISO(),
+): KnowledgeArticle[] {
+  const q = tokenize(query);
+  if (!q.length) return [];
+  const live = publishedArticles(pool ?? KNOWLEDGE_ARTICLES, today);
+
+
+  const scored = live
+    .map((article) => {
+      const title = tokenize(article.title);
+      const keys = article.keywords.map((k) => k.toLowerCase());
+      const body = tokenize(`${article.summary} ${article.keywords.join(" ")} ${article.steps.join(" ")}`);
+      let score = 0;
+      for (const token of q) {
+        if (title.includes(token)) score += 5;
+        if (keys.some((k) => k === token || k.includes(token) || token.includes(k))) score += 3;
+        if (body.includes(token)) score += 1;
+      }
+      const phrase = query.trim().toLowerCase();
+      if (phrase.length > 4 && article.title.toLowerCase().includes(phrase)) score += 6;
+      if (article.currency === "current") score += 0.4;
+      if (article.currency === "outdated") score -= 0.15;
+      return { article, score };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, limit).map((row) => row.article);
+}
+
+export function featuredArticles(pool: KnowledgeArticle[] = KNOWLEDGE_ARTICLES, today = todayISO()): KnowledgeArticle[] {
+  return publishedArticles(pool, today).filter((a) => a.featured);
+}
+
+export function articleById(id: string, pool: KnowledgeArticle[] = KNOWLEDGE_ARTICLES): KnowledgeArticle | undefined {
+  return pool.find((a) => a.id === id);
+}
+
+export const DESK_AGENT_SUGGESTIONS = [
+  "Password and MFA reset",
+  "Citrix won't launch",
+  "INFORMS timesheet",
+  "Printer not mapping",
+  "Account locked",
+];
+
+let knowledgeRevision = 0;
+
+export function bumpKnowledgeCache() {
+  knowledgeRevision += 1;
+}
+
+export function getKnowledgeRevision() {
+  return knowledgeRevision;
+}
