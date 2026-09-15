@@ -146,12 +146,17 @@ async function seedKnowledgeIfNeeded() {
 }
 
 async function loadAllArticles(): Promise<KnowledgeArticle[]> {
-  await seedKnowledgeIfNeeded();
-  const sql = await getSql();
-  const rows = await sql.query<ArticleRow>(
-    "select id, title, summary, steps_json, keywords_json, last_reviewed, currency, featured, supersedes_json, stale_note, expires_on, retired, updated_by from knowledge_articles order by id",
-  );
-  return rows.map(rowToArticle);
+  try {
+    await seedKnowledgeIfNeeded();
+    const sql = await getSql();
+    const rows = await sql.query<ArticleRow>(
+      "select id, title, summary, steps_json, keywords_json, last_reviewed, currency, featured, supersedes_json, stale_note, expires_on, retired, updated_by from knowledge_articles order by id",
+    );
+    return rows.map(rowToArticle);
+  } catch (err) {
+    console.error("[knowledge] using shipped articles:", err);
+    return KNOWLEDGE_ARTICLES;
+  }
 }
 
 export async function loadPublishedArticles(): Promise<KnowledgeArticle[]> {
@@ -175,35 +180,45 @@ async function listAdmins(): Promise<KnowledgeAdmin[]> {
 export async function applyHostedAdmins(emails: string[]) {
   const clean = emails.map(normalizeEmail).filter(isCountyEmail);
   setHostedAdmins(clean);
-  await seedKnowledgeIfNeeded();
-  const sql = await getSql();
-  for (const email of clean) {
-    await sql.query(
-      `insert into knowledge_admins (email, user_id, added_by) values ($1, $2, 'github')
-       on conflict (email) do nothing`,
-      [email, email],
-    );
-  }
-  const rows = await sql.query<{ email: string; added_by: string }>(
-    "select email, added_by from knowledge_admins",
-  );
-  const keep = new Set(clean);
-  for (const row of rows) {
-    if (row.added_by === "github" && !keep.has(row.email)) {
-      await sql.query("delete from knowledge_admins where email = $1 and added_by = 'github'", [row.email]);
+  try {
+    await seedKnowledgeIfNeeded();
+    const sql = await getSql();
+    for (const email of clean) {
+      await sql.query(
+        `insert into knowledge_admins (email, user_id, added_by) values ($1, $2, 'github')
+         on conflict (email) do nothing`,
+        [email, email],
+      );
     }
+    const rows = await sql.query<{ email: string; added_by: string }>(
+      "select email, added_by from knowledge_admins",
+    );
+    const keep = new Set(clean);
+    for (const row of rows) {
+      if (row.added_by === "github" && !keep.has(row.email)) {
+        await sql.query("delete from knowledge_admins where email = $1 and added_by = 'github'", [row.email]);
+      }
+    }
+  } catch (err) {
+    console.error("[knowledge] hosted admin sync skipped:", err);
   }
 }
 
 async function requireAdmin(upn: string) {
   if (!upn) throw new ForbiddenError("Sign in with this PC's Entra account.");
   if (!isCountyEmail(upn)) throw new ForbiddenError("Use a @miamidade.gov Entra UPN.");
-  await seedKnowledgeIfNeeded();
-  const admins = await listAdmins();
-  const isAdmin =
-    admins.some((admin) => admin.email === upn) || isShippedAdmin(upn) || isHostedAdmin(upn);
-  if (!isAdmin) throw new ForbiddenError("Not a Knowledge admin.");
-  return { email: upn, bootstrapped: false, admins };
+  const shipped = isShippedAdmin(upn) || isHostedAdmin(upn);
+  try {
+    await seedKnowledgeIfNeeded();
+    const admins = await listAdmins();
+    const isAdmin = admins.some((admin) => admin.email === upn) || shipped;
+    if (!isAdmin) throw new ForbiddenError("Not a Knowledge admin.");
+    return { email: upn, bootstrapped: false, admins };
+  } catch (err) {
+    if (err instanceof ForbiddenError) throw err;
+    if (shipped) return { email: upn, bootstrapped: false, admins: [] };
+    throw err;
+  }
 }
 
 function sanitizeArticle(input: ArticleInput): ArticleInput {
@@ -253,24 +268,36 @@ function sanitizeArticle(input: ArticleInput): ArticleInput {
 export const getKnowledgeAccess = createServerFn({ method: "POST" })
   .validator((input: { upn?: string }) => ({ upn: callerUpn(input?.upn) }))
   .handler(async ({ data }): Promise<KnowledgeAccess> => {
-    await seedKnowledgeIfNeeded();
     const upn = data.upn;
     if (!upn) {
       return { signedIn: false, isAdmin: false, email: null, county: false, bootstrapped: false, admins: [] };
     }
     const county = isCountyEmail(upn);
-    await seedKnowledgeIfNeeded();
-    const admins = await listAdmins();
-    const isAdmin =
-      county && (admins.some((admin) => admin.email === upn) || isShippedAdmin(upn) || isHostedAdmin(upn));
-    return {
-      signedIn: county,
-      isAdmin,
-      email: county ? upn : null,
-      county,
-      bootstrapped: false,
-      admins: isAdmin ? admins : [],
-    };
+    const shipped = county && (isShippedAdmin(upn) || isHostedAdmin(upn));
+    try {
+      await seedKnowledgeIfNeeded();
+      const admins = await listAdmins();
+      const isAdmin =
+        county && (admins.some((admin) => admin.email === upn) || isShippedAdmin(upn) || isHostedAdmin(upn));
+      return {
+        signedIn: county,
+        isAdmin,
+        email: county ? upn : null,
+        county,
+        bootstrapped: false,
+        admins: isAdmin ? admins : [],
+      };
+    } catch (err) {
+      console.error("[knowledge] access without local store:", err);
+      return {
+        signedIn: county,
+        isAdmin: Boolean(shipped),
+        email: county ? upn : null,
+        county,
+        bootstrapped: false,
+        admins: [],
+      };
+    }
   });
 
 export const listPublishedKnowledge = createServerFn({ method: "GET" }).handler(async () => {

@@ -9,7 +9,10 @@ export async function readDesktopWindowsIdentity() {
   const api = typeof window === "undefined" ? undefined : window.spartanDesktop;
   if (!api?.windowsIdentity) return null;
   try {
-    const identity = await api.windowsIdentity();
+    const identity = await Promise.race([
+      api.windowsIdentity(),
+      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 4000)),
+    ]);
     const upn = normalizeEmail(identity?.upn ?? "");
     if (!isCountyEmail(upn)) return null;
     return { upn, account: identity?.account?.trim() ?? "" };

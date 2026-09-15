@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 function run(command, args, extraEnv = {}) {
@@ -25,6 +25,18 @@ const output = path.join(process.cwd(), ".output");
 if (!existsSync(output)) {
   console.error("Electron pack: vite build did not produce .output/");
   process.exit(1);
+}
+
+const pgliteDist = path.join(process.cwd(), "node_modules", "@electric-sql", "pglite", "dist");
+const libs = path.join(output, "server", "_libs");
+mkdirSync(libs, { recursive: true });
+for (const file of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
+  const from = path.join(pgliteDist, file);
+  if (!existsSync(from)) {
+    console.warn(`Electron pack: missing ${from}`);
+    continue;
+  }
+  copyFileSync(from, path.join(libs, file));
 }
 
 const builderArgs = ["electron-builder", "--config", "electron-builder.yml", "--publish", "never"];

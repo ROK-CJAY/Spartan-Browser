@@ -66,8 +66,9 @@ export function GuestSignIn() {
     if (!desktop) return;
     let cancelled = false;
     void readDesktopWindowsIdentity().then((identity) => {
-      if (cancelled || !identity) {
-        if (!cancelled) setWaiting(false);
+      if (cancelled) return;
+      if (!identity) {
+        setWaiting(false);
         return;
       }
       setConfig({ entraUpn: identity.upn, windowsAccount: identity.account });

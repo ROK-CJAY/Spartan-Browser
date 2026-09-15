@@ -1264,14 +1264,17 @@ function AboutSection() {
     setBusy(true);
     setError("");
     try {
-      const next = await checkDeskUpdates();
-      setStatus(next);
       if (desktop) {
         const update = await checkDesktopUpdates();
         if (update) setInstaller(update);
+        if (update?.error) setError(update.error);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reach GitHub.");
+      try {
+        const next = await checkDeskUpdates();
+        setStatus(next);
+      } catch (err) {
+        if (!desktop) setError(err instanceof Error ? err.message : "Could not reach GitHub.");
+      }
     } finally {
       setBusy(false);
     }

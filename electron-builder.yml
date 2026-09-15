@@ -13,6 +13,12 @@ extraResources:
     to: app-server
   - from: policy
     to: policy
+  - from: node_modules/@electric-sql/pglite/dist/pglite.data
+    to: app-server/server/_libs/pglite.data
+  - from: node_modules/@electric-sql/pglite/dist/pglite.wasm
+    to: app-server/server/_libs/pglite.wasm
+  - from: node_modules/@electric-sql/pglite/dist/initdb.wasm
+    to: app-server/server/_libs/initdb.wasm
 win:
   target:
     - target: nsis

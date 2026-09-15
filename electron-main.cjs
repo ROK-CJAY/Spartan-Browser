@@ -30,6 +30,7 @@ function serverEntry() {
 
 function startServer() {
   const entry = serverEntry();
+  const userData = app.getPath("userData");
   serverProc = spawn(process.execPath, [entry], {
     env: {
       ...process.env,
@@ -38,6 +39,7 @@ function startServer() {
       NITRO_PORT: String(PORT),
       HOST: "127.0.0.1",
       NITRO_HOST: "127.0.0.1",
+      PGLITE_DATA_DIR: path.join(userData, "pglite"),
     },
     stdio: "pipe",
   });
@@ -93,6 +95,53 @@ function parseIdentity(raw) {
   return { upn, account: (accountLine?.[1] || "").trim() };
 }
 
+function identityFromEnv() {
+  const user = String(process.env.USERNAME || process.env.USER || "").trim();
+  const domain = String(process.env.USERDOMAIN || "").trim();
+  const upnEnv = String(process.env.USERPRINCIPALNAME || "").trim().toLowerCase();
+  const account = domain && user ? `${domain}\\${user}` : user;
+  if (upnEnv.includes("@miamidade.gov")) return { upn: upnEnv, account };
+  if (user) return { upn: `${user.toLowerCase()}@miamidade.gov`, account };
+  return null;
+}
+
+function runTimed(command, args, ms) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { windowsHide: true });
+    let out = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve("");
+    }, ms);
+    child.stdout.on("data", (chunk) => {
+      out += chunk.toString();
+    });
+    const done = () => {
+      clearTimeout(timer);
+      resolve(out.trim());
+    };
+    child.on("close", done);
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve("");
+    });
+  });
+}
+
+async function readWindowsIdentity() {
+  const upnOut = (await runTimed("whoami", ["/upn"], 2500)).toLowerCase();
+  if (upnOut.includes("@miamidade.gov")) {
+    const account = await runTimed("whoami", [], 1500);
+    return { upn: upnOut.split(/\s+/)[0], account };
+  }
+  const scriptOut = await runTimed(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(IDENTITY_SCRIPT)],
+    3000,
+  );
+  return parseIdentity(scriptOut) || identityFromEnv();
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -126,20 +175,12 @@ function keepInsideSpartan(url) {
 }
 
 ipcMain.handle("app-version", () => app.getVersion());
-ipcMain.handle("windows-identity", () => {
-  return new Promise((resolve) => {
-    const child = spawn(
-      "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(IDENTITY_SCRIPT)],
-      { windowsHide: true },
-    );
-    let out = "";
-    child.stdout.on("data", (chunk) => {
-      out += chunk.toString();
-    });
-    child.on("close", () => resolve(parseIdentity(out)));
-    child.on("error", () => resolve(null));
-  });
+ipcMain.handle("windows-identity", async () => {
+  try {
+    return (await readWindowsIdentity()) || identityFromEnv();
+  } catch {
+    return identityFromEnv();
+  }
 });
 
 const updateState = {

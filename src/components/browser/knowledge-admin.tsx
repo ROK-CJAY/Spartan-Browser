@@ -10,7 +10,7 @@ import {
   type KnowledgeAccess,
   type ArticleInput,
 } from "@/lib/browser/knowledge-server";
-import { todayISO, isShippedAdmin, type ArticleCurrency, type KnowledgeArticle } from "@/lib/browser/knowledge-base";
+import { todayISO, isCountyEmail, isShippedAdmin, type ArticleCurrency, type KnowledgeArticle } from "@/lib/browser/knowledge-base";
 import { isHostedAdmin } from "@/lib/browser/desk-updates";
 import { useBrowserStore } from "@/lib/browser/store";
 import { GuestSignIn } from "./identity";
@@ -63,10 +63,15 @@ export function KnowledgeAdminPage() {
 
   async function refresh() {
     const next = await getKnowledgeAccess({ data: { upn } });
-    setAccess(next);
-    if (next.isAdmin) {
-      const rows = await listManagedKnowledge({ data: { upn } });
-      setArticles(rows);
+    const admin = next.isAdmin || isHostedAdmin(upn) || isShippedAdmin(upn);
+    setAccess({ ...next, signedIn: next.signedIn || Boolean(upn), isAdmin: admin });
+    if (admin) {
+      try {
+        const rows = await listManagedKnowledge({ data: { upn } });
+        setArticles(rows);
+      } catch {
+        setArticles([]);
+      }
     } else {
       setArticles([]);
     }
@@ -74,7 +79,14 @@ export function KnowledgeAdminPage() {
 
   useEffect(() => {
     void refresh().catch(() =>
-      setAccess({ signedIn: false, isAdmin: false, email: null, county: false, bootstrapped: false, admins: [] }),
+      setAccess({
+        signedIn: Boolean(upn),
+        isAdmin: isHostedAdmin(upn) || isShippedAdmin(upn),
+        email: upn || null,
+        county: Boolean(upn),
+        bootstrapped: false,
+        admins: [],
+      }),
     );
   }, [upn]);
 
@@ -171,7 +183,7 @@ export function KnowledgeAdminPage() {
           </div>
         </header>
 
-        {!upn || !access.signedIn ? (
+        {!upn ? (
           <div className="space-y-3">
             <GateCard
               title="Windows account"
@@ -179,6 +191,11 @@ export function KnowledgeAdminPage() {
             />
             <GuestSignIn />
           </div>
+        ) : !(access.signedIn || isCountyEmail(upn)) ? (
+          <GateCard
+            title="Windows account required"
+            body="This desk could not confirm a County @miamidade.gov logon."
+          />
         ) : !(access.isAdmin || isHostedAdmin(upn) || isShippedAdmin(upn)) ? (
           <GateCard
             title="You are not a Knowledge admin"
