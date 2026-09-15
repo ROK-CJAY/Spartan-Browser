@@ -1,0 +1,14 @@
+node_modules
+.pglite
+data
+dist
+.vercel
+.grok
+screenshots
+artifacts
+attachments
+*.log
+.env
+.env.*
+.project_id
+.node_modules.lock
