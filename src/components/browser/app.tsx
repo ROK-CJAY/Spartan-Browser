@@ -543,7 +543,7 @@ function Chrome({
             onDesktop={(app) => {
               void openDesktopApp(app, setElevatedTool, setDeskNotice, setDeskError);
             }}
-            onNavigate={(url, title) => navigate(url, title)}
+            onNavigate={(url) => newTab(url)}
           />
         </aside>
       ) : null}
@@ -560,8 +560,8 @@ function Chrome({
                 void openDesktopApp(app, setElevatedTool, setDeskNotice, setDeskError);
                 setMobilePanel(false);
               }}
-              onNavigate={(url, title) => {
-                navigate(url, title);
+              onNavigate={(url) => {
+                newTab(url);
                 setMobilePanel(false);
               }}
             />

@@ -18,6 +18,10 @@ export function DesktopWebview({ url, reloadKey }: { url: string; title: string;
     const view = document.createElement("webview") as WebviewEl;
     view.setAttribute("partition", "persist:spartan");
     view.setAttribute("allowpopups", "true");
+    view.setAttribute(
+      "useragent",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    );
     view.setAttribute("src", url);
     view.style.width = "100%";
     view.style.height = "100%";

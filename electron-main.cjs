@@ -20,6 +20,10 @@ const AUTH_LIST = [
   "*.sharepoint.com",
   "login.microsoftonline.com",
   "*.microsoftonline.com",
+  "login.windows.net",
+  "login.microsoft.com",
+  "autologon.microsoftazuread-sso.com",
+  "*.microsoftazuread-sso.com",
   "*.msftauth.net",
   "*.msauth.net",
   "*.windows.net",
@@ -35,6 +39,10 @@ const NTLM_URLS = [
   "https://*.sharepoint.com",
   "https://login.microsoftonline.com",
   "https://*.microsoftonline.com",
+  "https://login.windows.net",
+  "https://login.microsoft.com",
+  "https://autologon.microsoftazuread-sso.com",
+  "https://*.microsoftazuread-sso.com",
   "https://*.msftauth.net",
   "https://*.msauth.net",
   "https://*.windows.net",
@@ -43,7 +51,14 @@ const NTLM_URLS = [
 ];
 
 const COUNTY_AUTH_HOST =
-  /miamidade\.gov|onbmc\.com|sharepoint\.com|microsoftonline\.com|msftauth\.net|msauth\.net|office\.com|office365\.com|windows\.net/i;
+  /miamidade\.gov|onbmc\.com|sharepoint\.com|microsoftonline\.com|microsoft\.com|microsoftazuread-sso\.com|msftauth\.net|msauth\.net|office\.com|office365\.com|windows\.net/i;
+
+const ENTRA_HOST = /login\.microsoftonline\.com|login\.windows\.net|login\.microsoft\.com/i;
+
+const CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+let cachedUpn = "";
 
 app.commandLine.appendSwitch("auth-server-whitelist", AUTH_LIST);
 app.commandLine.appendSwitch("auth-server-allowlist", AUTH_LIST);
@@ -51,7 +66,9 @@ app.commandLine.appendSwitch("auth-negotiate-delegate-whitelist", AUTH_LIST);
 app.commandLine.appendSwitch("auth-negotiate-delegate-allowlist", AUTH_LIST);
 app.commandLine.appendSwitch("auth-schemes", "ntlm,negotiate");
 app.commandLine.appendSwitch("proxy-auto-detect");
+app.commandLine.appendSwitch("enable-features", "CloudAPAuth");
 app.commandLine.appendSwitch("disable-features", "ThirdPartyStoragePartitioning,TrackingProtection3pcd");
+app.userAgentFallback = CHROME_UA;
 
 function serverRoot() {
   if (app.isPackaged) return path.join(process.resourcesPath, "app-server");
@@ -182,14 +199,179 @@ async function readWindowsIdentity() {
   return parseIdentity(scriptOut) || identityFromEnv();
 }
 
-function hardenCountySession(ses) {
-  if (!ses) return;
+const POP_TYPE = String.raw`
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+[StructLayout(LayoutKind.Sequential)]
+public struct ProofOfPossessionCookieInfo {
+  [MarshalAs(UnmanagedType.LPWStr)] public string Name;
+  [MarshalAs(UnmanagedType.LPWStr)] public string Data;
+  public uint Flags;
+  [MarshalAs(UnmanagedType.LPWStr)] public string P3PHeader;
+}
+
+[ComImport, Guid("CDAECE56-4EDF-43DF-B113-88E4556FA1BB"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IProofOfPossessionCookieInfoManager {
+  void GetCookieInfoForUri([MarshalAs(UnmanagedType.LPWStr)] string uri, out uint cookieCount, out IntPtr cookieInfo);
+}
+
+[ComImport, Guid("A9927F85-A304-4390-8B23-A75F1C668600")]
+public class WindowsProofOfPossessionCookieInfoManager { }
+
+public static class SpartanPopHelper {
+  public static string Get(string uri) {
+    var mgr = (IProofOfPossessionCookieInfoManager)new WindowsProofOfPossessionCookieInfoManager();
+    uint count;
+    IntPtr ptr;
+    mgr.GetCookieInfoForUri(uri, out count, out ptr);
+    var sb = new StringBuilder();
+    int size = Marshal.SizeOf(typeof(ProofOfPossessionCookieInfo));
+    for (int i = 0; i < count; i++) {
+      var info = Marshal.PtrToStructure<ProofOfPossessionCookieInfo>(IntPtr.Add(ptr, i * size));
+      if (string.IsNullOrEmpty(info.Name)) continue;
+      if (sb.Length > 0) sb.Append('\n');
+      sb.Append(info.Name).Append('=').Append(info.Data ?? "");
+    }
+    return sb.ToString();
+  }
+}
+`;
+
+const popCache = new Map();
+const ssoSessions = new WeakSet();
+
+function parsePopLines(raw) {
+  return String(raw || "")
+    .split(/\r?\n/)
+    .map((line) => {
+      const idx = line.indexOf("=");
+      if (idx < 1) return null;
+      return { name: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+    })
+    .filter((row) => row && row.name && row.value);
+}
+
+async function proofOfPossessionCookies(uri) {
+  if (process.platform !== "win32") return [];
+  const key = (() => {
+    try {
+      return new URL(uri).origin;
+    } catch {
+      return uri;
+    }
+  })();
+  const hit = popCache.get(key);
+  if (hit && Date.now() - hit.at < 45_000) return hit.cookies;
+  const escaped = String(uri).replace(/'/g, "''");
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -TypeDefinition @'
+${POP_TYPE}
+'@
+[SpartanPopHelper]::Get('${escaped}')
+`;
+  const raw = await runTimed(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)],
+    4000,
+  );
+  const cookies = parsePopLines(raw);
+  popCache.set(key, { at: Date.now(), cookies });
+  return cookies;
+}
+
+function withEntraHints(urlString, upn) {
+  if (!upn) return null;
+  try {
+    const url = new URL(urlString);
+    if (!ENTRA_HOST.test(url.hostname)) return null;
+    if (!/oauth2|authorize|login/i.test(url.pathname + url.search)) return null;
+    if (url.searchParams.get("login_hint") === upn) return null;
+    url.searchParams.set("login_hint", upn);
+    url.searchParams.set("domain_hint", "miamidade.gov");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function entraAutofillScript(upn) {
+  return `(function(){
+    var upn = ${JSON.stringify(upn)};
+    if (!upn) return;
+    var input = document.querySelector('input[name="loginfmt"], input[type="email"]#i0116, input[type="email"]');
+    if (!input) return;
+    var current = (input.value || "").trim().toLowerCase();
+    if (current === upn.toLowerCase()) return;
+    var desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    if (desc && desc.set) desc.set.call(input, upn);
+    else input.value = upn;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    var btn = document.querySelector("#idSIButton9");
+    if (btn && !input.closest("form")?.querySelector('input[type="password"]')) btn.click();
+  })();`;
+}
+
+function installCountySso(ses) {
+  if (!ses || ssoSessions.has(ses)) return;
+  ssoSessions.add(ses);
   try {
     ses.allowNTLMCredentialsForUrls(NTLM_URLS);
   } catch (err) {
     console.warn("[auth] NTLM allow list", err);
   }
   ses.setProxy({ mode: "system" }).catch(() => {});
+  try {
+    ses.setUserAgent(CHROME_UA);
+  } catch {
+    /* older electron */
+  }
+  ses.webRequest.onBeforeRequest({ urls: ["https://login.microsoftonline.com/*", "https://login.windows.net/*", "https://login.microsoft.com/*"] }, (details, callback) => {
+    if (details.method !== "GET") return callback({});
+    const next = withEntraHints(details.url, cachedUpn);
+    if (next) return callback({ redirectURL: next });
+    callback({});
+  });
+  ses.webRequest.onBeforeSendHeaders(
+    {
+      urls: [
+        "https://login.microsoftonline.com/*",
+        "https://login.windows.net/*",
+        "https://login.microsoft.com/*",
+        "https://autologon.microsoftazuread-sso.com/*",
+        "https://*.msftauth.net/*",
+        "https://*.msauth.net/*",
+      ],
+    },
+    (details, callback) => {
+      const headers = { ...(details.requestHeaders || {}) };
+      proofOfPossessionCookies(details.url)
+        .then((cookies) => {
+          if (cookies.length) {
+            const extra = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+            headers.Cookie = headers.Cookie ? `${headers.Cookie}; ${extra}` : extra;
+          }
+          callback({ requestHeaders: headers });
+        })
+        .catch(() => callback({ requestHeaders: headers }));
+    },
+  );
+}
+
+function attachEntraHelpers(contents) {
+  contents.on("did-finish-load", () => {
+    const url = contents.getURL?.() || "";
+    if (!cachedUpn || !ENTRA_HOST.test(url)) return;
+    contents.executeJavaScript(entraAutofillScript(cachedUpn)).catch(() => {});
+  });
+  try {
+    contents.setUserAgent(CHROME_UA);
+  } catch {
+    /* guest may not support it yet */
+  }
 }
 
 const DESKTOP_LAUNCHERS = {
@@ -317,9 +499,13 @@ function keepInsideSpartan(url) {
 ipcMain.handle("app-version", () => app.getVersion());
 ipcMain.handle("windows-identity", async () => {
   try {
-    return (await readWindowsIdentity()) || identityFromEnv();
+    const identity = (await readWindowsIdentity()) || identityFromEnv();
+    if (identity?.upn) cachedUpn = identity.upn;
+    return identity;
   } catch {
-    return identityFromEnv();
+    const identity = identityFromEnv();
+    if (identity?.upn) cachedUpn = identity.upn;
+    return identity;
   }
 });
 ipcMain.handle("desktop:launch", async (_event, id) => launchDesktopApp(id));
@@ -415,12 +601,22 @@ ipcMain.handle("updater:install", () => {
 });
 
 app.on("web-contents-created", (_event, contents) => {
-  hardenCountySession(contents.session);
+  installCountySso(contents.session);
+  attachEntraHelpers(contents);
   contents.setWindowOpenHandler(({ url }) => keepInsideSpartan(url));
-  contents.on("will-attach-webview", (event, prefs) => {
+  contents.on("will-attach-webview", (_event, prefs) => {
     prefs.partition = "persist:spartan";
     prefs.nodeIntegration = false;
     prefs.contextIsolation = true;
+  });
+  contents.on("did-attach-webview", (_event, guest) => {
+    installCountySso(guest.session);
+    attachEntraHelpers(guest);
+    try {
+      guest.setUserAgent(CHROME_UA);
+    } catch {
+      /* ignore */
+    }
   });
   contents.on("will-navigate", (event, url) => {
     if (contents.getType() !== "window") return;
@@ -434,8 +630,15 @@ app.on("web-contents-created", (_event, contents) => {
 
 app.whenReady().then(async () => {
   const ses = session.fromPartition("persist:spartan");
-  hardenCountySession(ses);
-  hardenCountySession(session.defaultSession);
+  installCountySso(ses);
+  installCountySso(session.defaultSession);
+  const bootId = identityFromEnv();
+  if (bootId?.upn) cachedUpn = bootId.upn;
+  readWindowsIdentity()
+    .then((identity) => {
+      if (identity?.upn) cachedUpn = identity.upn;
+    })
+    .catch(() => {});
   startServer();
   await waitForServer(`http://127.0.0.1:${PORT}/`);
   createWindow();

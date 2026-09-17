@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "updatedAt": "2026-09-17T14:30:00Z",
-  "minAppVersion": "0.9.5",
+  "minAppVersion": "0.9.6",
   "admins": [
     "e315170@miamidade.gov",
     "e325037@miamidade.gov",
