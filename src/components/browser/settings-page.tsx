@@ -885,14 +885,15 @@ function AssistantSection() {
     <>
       <Heading title="Desk assistant" />
       <Subhead>
-        Workspace retrieves Remedy articles and writes an answer a phone agent can read. Optional: a model on this PC
-        (Ollama, localhost only). Knowledge admins train the catalog and can push it to every open desk.
+        Workspace retrieves Remedy articles and writes an answer a phone agent can read. That works with no extra
+        software. Optional: a model on this PC or one County Ollama host in the hosted policy. Knowledge admins train
+        the catalog.
       </Subhead>
       <Group>
         <Toggle label="Show assistant in the sidebar" checked={config.aiAssist} onChange={(v) => setConfig({ aiAssist: v })} />
         <Toggle
           label="Use a local model on this PC"
-          hint="Ollama at 127.0.0.1 only. If it is not running, the desk agent still answers from the articles."
+          hint="Ollama on this PC or a County host from policy. If none is running, the desk agent still answers from the articles."
           checked={config.ollamaEnabled}
           onChange={(v) => setConfig({ ollamaEnabled: v })}
         />

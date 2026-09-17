@@ -1,7 +1,7 @@
 import { isCountyEmail, normalizeEmail, SEEDED_KNOWLEDGE_ADMINS } from "./knowledge-base.ts";
 
 
-export const APP_VERSION = "0.9.4";
+export const APP_VERSION = "0.9.5";
 export const HDB_REPO = "ROK-CJAY/Spartan-Browser";
 
 export const POLICY_URLS = [
@@ -20,6 +20,13 @@ export type DeskPolicy = {
   updatedAt: string;
   minAppVersion?: string;
   admins: string[];
+  modelUrl?: string;
+  modelName?: string;
+};
+
+export type HostedModel = {
+  url: string;
+  name: string;
 };
 
 export type DeskUpdateStatus = {
@@ -34,6 +41,7 @@ export type DeskUpdateStatus = {
 };
 
 let hostedAdmins: string[] = [...SEEDED_KNOWLEDGE_ADMINS];
+let hostedModel: HostedModel = { url: "", name: "llama3.1" };
 
 export function setHostedAdmins(emails: string[]) {
   const next = emails.map(normalizeEmail).filter(isCountyEmail);
@@ -47,6 +55,46 @@ export function getHostedAdmins(): string[] {
 export function isHostedAdmin(email: string | null | undefined): boolean {
   if (!email) return false;
   return hostedAdmins.includes(normalizeEmail(email));
+}
+
+export function setHostedModel(url?: string, name?: string) {
+  hostedModel = {
+    url: sanitizeModelUrl(url || ""),
+    name: (name || "llama3.1").trim().slice(0, 80) || "llama3.1",
+  };
+}
+
+export function getHostedModel(): HostedModel {
+  return hostedModel;
+}
+
+function isPrivateIpv4(host: string) {
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  const c = Number(m[3]);
+  const d = Number(m[4]);
+  if ([a, b, c, d].some((n) => n > 255)) return false;
+  if (a === 10 || a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  return false;
+}
+
+/** Localhost, county host, or RFC1918 — never a public LLM host. */
+export function sanitizeModelUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    const host = url.hostname.toLowerCase();
+    if (host === "127.0.0.1" || host === "localhost") return url.origin;
+    if (host === "miamidade.gov" || host.endsWith(".miamidade.gov")) return url.origin;
+    if (isPrivateIpv4(host)) return url.origin;
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 export function compareVersions(a: string, b: string): number {
@@ -72,7 +120,16 @@ export function parseDeskPolicy(raw: unknown): DeskPolicy | null {
   const updatedAt = typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString();
   const minAppVersion = typeof value.minAppVersion === "string" ? value.minAppVersion : undefined;
   const schema = typeof value.schema === "number" ? value.schema : 1;
-  return { schema, updatedAt, minAppVersion, admins };
+  const modelUrl = typeof value.modelUrl === "string" ? sanitizeModelUrl(value.modelUrl) : "";
+  const modelName = typeof value.modelName === "string" ? value.modelName.trim().slice(0, 80) : "";
+  return {
+    schema,
+    updatedAt,
+    minAppVersion,
+    admins,
+    ...(modelUrl ? { modelUrl } : {}),
+    ...(modelName ? { modelName } : {}),
+  };
 }
 
 export function fallbackPolicy(): DeskPolicy {

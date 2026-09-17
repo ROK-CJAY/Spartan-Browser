@@ -3,6 +3,7 @@ import { Download, Eye, EyeOff, KeyRound, Lock, Play } from "lucide-react";
 import { useBrowserStore } from "@/lib/browser/store";
 import { ELEVATED_TOOLS, type ElevatedToolId } from "@/lib/browser/types";
 import { downloadElevatedScript, launchCommand, scriptFileName, toolScriptPath } from "@/lib/browser/elevated-scripts";
+import { isSpartanDesktop, launchElevatedTool } from "@/lib/browser/desktop";
 import { addDaysIso, expiryState, formatExpiry, loginForTool } from "@/lib/browser/vault-crypto";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -95,6 +96,19 @@ export function ElevatedLaunchDialog({
       setUser(row.username);
       setMode("form");
       setMsg("Unlock the vault or enter the password again to launch.");
+      return;
+    }
+    if (isSpartanDesktop()) {
+      setBusy(true);
+      setMsg("");
+      void launchElevatedTool({
+        command: launchCommand(toolId, row.username, { computer, mode: "inline" }),
+        password: row.password,
+      }).then((result) => {
+        setBusy(false);
+        if (result.ok) onClose();
+        else setMsg(result.error || "Could not start the tool on this PC.");
+      });
       return;
     }
     setMode("queued");
@@ -218,8 +232,8 @@ export function ElevatedLaunchDialog({
             ) : null}
             <p className="text-[12px] leading-relaxed text-[var(--muted)]">
               {launchMode === "inline"
-                ? "On the desk image this runs PowerShell in memory as that account. Nothing is written to C:\\Scripts or any other folder."
-                : `On the desk image this runs ${filePath} as that account. Change the folder in Settings → Passwords. Do not put the password in the file.`}
+                ? "On this PC Spartan runs encoded PowerShell in memory and pipes the vault password on stdin — no file on disk."
+                : `On this PC Spartan runs ${filePath} as that account. Change the folder in Settings → Passwords. Do not put the password in the file.`}
             </p>
             <div className="flex flex-wrap justify-end gap-2">
               <Button
@@ -239,7 +253,7 @@ export function ElevatedLaunchDialog({
                   Script
                 </Button>
               ) : null}
-              <Button type="button" onClick={launch} disabled={expiry.state === "expired"}>
+              <Button type="button" onClick={launch} disabled={expiry.state === "expired" || busy}>
                 <Play className="size-4" />
                 Launch as {login.username.split("\\").pop()}
               </Button>

@@ -287,12 +287,12 @@ export const ITD_TOOLS: ItdTool[] = [
 ];
 
 export const DESKTOP_APPS = [
-  { id: "notepad", label: "Notepad", hint: "Windows image only" },
-  { id: "calc", label: "Calculator", hint: "Windows image only" },
+  { id: "notepad", label: "Notepad", hint: "Opens on this PC" },
+  { id: "calc", label: "Calculator", hint: "Opens on this PC" },
   { id: "aduc", label: "Active Directory", hint: "Launch as a saved admin account" },
-  { id: "mainframe", label: "Mainframe (TN3270)", hint: "Mocha Soft on the desk image" },
-  { id: "lockout", label: "Lockout Status", hint: "Resource Kit tool on the desk image" },
-  { id: "teamviewer", label: "TeamViewer", hint: "Installed on the desk image" },
+  { id: "mainframe", label: "Mainframe (TN3270)", hint: "Mocha Soft on this PC" },
+  { id: "lockout", label: "Lockout Status", hint: "Resource Kit tool on this PC" },
+  { id: "teamviewer", label: "TeamViewer", hint: "Installed on this PC" },
   { id: "cmrc", label: "CmRC Viewer", hint: "Launch as a saved admin account" },
 ] as const;
 
@@ -434,7 +434,7 @@ export function defaultConfig(): BrowserConfig {
     autofill: true,
     syncEnabled: true,
     downloadAsk: true,
-    aiAssist: false,
+    aiAssist: true,
     ollamaEnabled: true,
     ollamaUrl: "http://127.0.0.1:11434",
     ollamaModel: "llama3.1",
@@ -442,7 +442,7 @@ export function defaultConfig(): BrowserConfig {
     searchSuggestions: true,
     httpsOnly: true,
     trackingPrevention: "balanced",
-    cookieMode: "block-third",
+    cookieMode: "allow",
     searchEngine: "county",
     startupBehavior: "ntp",
     colorMode: "dark",

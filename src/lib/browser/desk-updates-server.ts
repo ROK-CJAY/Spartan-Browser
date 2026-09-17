@@ -1,6 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { applyHostedAdmins, applyHostedKnowledge } from "./knowledge-server";
 import { parseKnowledgeCatalog } from "./knowledge-import";
 import {
@@ -11,6 +9,7 @@ import {
   buildUpdateStatus,
   fallbackPolicy,
   parseDeskPolicy,
+  setHostedModel,
   type DeskPolicy,
   type DeskUpdateStatus,
 } from "./desk-updates";
@@ -39,27 +38,25 @@ async function fetchJson(url: string): Promise<unknown | null> {
   }
 }
 
+function decodeBase64(value: string): string {
+  const clean = value.replace(/\s/g, "");
+  if (typeof atob === "function") return atob(clean);
+  const BufferCtor = (globalThis as { Buffer?: { from: (s: string, enc: string) => { toString: (enc: string) => string } } }).Buffer;
+  if (BufferCtor) return BufferCtor.from(clean, "base64").toString("utf8");
+  return clean;
+}
+
 function decodeGithubFile(json: unknown): unknown {
   if (!json || typeof json !== "object") return json;
   const value = json as Record<string, unknown>;
   if (typeof value.content === "string" && typeof value.sha === "string") {
     try {
-      return JSON.parse(Buffer.from(value.content.replace(/\n/g, ""), "base64").toString("utf8"));
+      return JSON.parse(decodeBase64(value.content));
     } catch {
       return json;
     }
   }
   return json;
-}
-
-async function loadFallbackFile(): Promise<DeskPolicy | null> {
-  try {
-    const file = path.join(process.cwd(), "public", "desk-policy.json");
-    const raw = await readFile(file, "utf-8");
-    return parseDeskPolicy(JSON.parse(raw) as unknown);
-  } catch {
-    return null;
-  }
 }
 
 async function loadHostedPolicy(): Promise<{ policy: DeskPolicy; source: DeskUpdateStatus["source"] }> {
@@ -68,8 +65,6 @@ async function loadHostedPolicy(): Promise<{ policy: DeskPolicy; source: DeskUpd
     const policy = parseDeskPolicy(json);
     if (policy) return { policy, source: "github" };
   }
-  const file = await loadFallbackFile();
-  if (file) return { policy: file, source: "fallback" };
   return { policy: fallbackPolicy(), source: "offline" };
 }
 
@@ -83,23 +78,6 @@ async function loadLatestRelease(): Promise<{ tag: string | null; url: string | 
   return { tag, url, notes };
 }
 
-async function loadFallbackKnowledge() {
-  const candidates = [
-    path.join(process.cwd(), "knowledge", "desk-knowledge.json"),
-    path.join(process.cwd(), "public", "desk-knowledge.json"),
-  ];
-  for (const file of candidates) {
-    try {
-      const raw = await readFile(file, "utf-8");
-      const catalog = parseKnowledgeCatalog(JSON.parse(raw) as unknown);
-      if (catalog) return catalog;
-    } catch {
-      /* next */
-    }
-  }
-  return null;
-}
-
 async function loadHostedKnowledge() {
   for (const url of KNOWLEDGE_CATALOG_URLS) {
     const json = await fetchJson(url);
@@ -107,7 +85,7 @@ async function loadHostedKnowledge() {
     const catalog = parseKnowledgeCatalog(decodeGithubFile(json));
     if (catalog) return catalog;
   }
-  return loadFallbackKnowledge();
+  return null;
 }
 
 export async function pullHostedKnowledge() {
@@ -131,16 +109,30 @@ export const syncHostedKnowledge = createServerFn({ method: "GET" }).handler(asy
 });
 
 export const checkDeskUpdates = createServerFn({ method: "GET" }).handler(async (): Promise<DeskUpdateStatus> => {
-  const [{ policy, source }, release] = await Promise.all([loadHostedPolicy(), loadLatestRelease()]);
-  await applyHostedAdmins(policy.admins);
-  await pullHostedKnowledge().catch(() => null);
-  return buildUpdateStatus({
-    policy,
-    source,
-    latestVersion: release.tag,
-    releaseUrl: release.url,
-    releaseNotes: release.notes,
-  });
+  try {
+    const [{ policy, source }, release] = await Promise.all([loadHostedPolicy(), loadLatestRelease()]);
+    await applyHostedAdmins(policy.admins).catch((err) => {
+      console.error("[updates] admin sync skipped:", err);
+    });
+    setHostedModel(policy.modelUrl, policy.modelName);
+    await pullHostedKnowledge().catch(() => null);
+    return buildUpdateStatus({
+      policy,
+      source,
+      latestVersion: release.tag,
+      releaseUrl: release.url,
+      releaseNotes: release.notes,
+    });
+  } catch (err) {
+    console.error("[updates] check failed:", err);
+    return buildUpdateStatus({
+      policy: fallbackPolicy(),
+      source: "offline",
+      latestVersion: null,
+      releaseUrl: null,
+      releaseNotes: null,
+    });
+  }
 });
 
 export { APP_VERSION };

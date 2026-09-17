@@ -66,10 +66,32 @@ import {
 } from "@/lib/browser/types";
 import { checkDeskUpdates, syncHostedKnowledge } from "@/lib/browser/desk-updates-server";
 import { isHostedAdmin, KNOWLEDGE_POLL_MS, type DeskUpdateStatus } from "@/lib/browser/desk-updates";
-import { isSpartanDesktop, installDesktopUpdate, readDesktopUpdateStatus, readDesktopWindowsIdentity, subscribeDesktopUpdates } from "@/lib/browser/desktop";
+import { isSpartanDesktop, installDesktopUpdate, launchDesktopApp, readDesktopUpdateStatus, readDesktopWindowsIdentity, subscribeDesktopUpdates } from "@/lib/browser/desktop";
 import type { DesktopUpdateStatus } from "@/types/spartan-desktop";
 import { expiryState, loginForTool } from "@/lib/browser/vault-crypto";
 import { cn } from "@/lib/utils";
+
+async function openDesktopApp(
+  app: (typeof DESKTOP_APPS)[number],
+  setElevatedTool: (id: "aduc" | "cmrc") => void,
+  setDeskNotice: (app: (typeof DESKTOP_APPS)[number] | null) => void,
+  setDeskError: (error: string) => void,
+) {
+  if (isElevatedTool(app.id)) {
+    setElevatedTool(app.id);
+    return;
+  }
+  if (!isSpartanDesktop()) {
+    setDeskError("");
+    setDeskNotice(app);
+    return;
+  }
+  const result = await launchDesktopApp(app.id);
+  if (!result.ok) {
+    setDeskError(result.error || `Could not open ${app.label}. Is it installed on this PC?`);
+    setDeskNotice(app);
+  }
+}
 
 export function BrowserApp() {
   const theme = useBrowserStore((s) => s.theme);
@@ -246,6 +268,7 @@ function Chrome({
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [typoUrl, setTypoUrl] = useState<string | null>(null);
   const [deskNotice, setDeskNotice] = useState<(typeof DESKTOP_APPS)[number] | null>(null);
+  const [deskError, setDeskError] = useState("");
   const [elevatedTool, setElevatedTool] = useState<null | "aduc" | "cmrc">(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [mobilePanel, setMobilePanel] = useState(false);
@@ -317,6 +340,7 @@ function Chrome({
         setMobilePanel(false);
         setElevatedTool(null);
         setDeskNotice(null);
+        setDeskError("");
         if (document.activeElement === addressRef.current && addressRef.current) {
           addressRef.current.value = store.activeTab().url;
           store.setAddressDraft(store.activeTab().url);
@@ -517,8 +541,7 @@ function Chrome({
           <WorkspacePanel
             panel={panel}
             onDesktop={(app) => {
-              if (isElevatedTool(app.id)) setElevatedTool(app.id);
-              else setDeskNotice(app);
+              void openDesktopApp(app, setElevatedTool, setDeskNotice, setDeskError);
             }}
             onNavigate={(url, title) => navigate(url, title)}
           />
@@ -534,8 +557,7 @@ function Chrome({
             <WorkspacePanel
               panel={panel}
               onDesktop={(app) => {
-                if (isElevatedTool(app.id)) setElevatedTool(app.id);
-                else setDeskNotice(app);
+                void openDesktopApp(app, setElevatedTool, setDeskNotice, setDeskError);
                 setMobilePanel(false);
               }}
               onNavigate={(url, title) => {
@@ -833,21 +855,25 @@ function Chrome({
         <ElevatedLaunchDialog key={elevatedTool} toolId={elevatedTool} onClose={() => setElevatedTool(null)} />
       ) : null}
       {deskNotice ? (
-        <div className="fixed inset-0 z-[90] grid place-items-center bg-black/50 p-4" onClick={() => setDeskNotice(null)}>
+        <div className="fixed inset-0 z-[90] grid place-items-center bg-black/50 p-4" onClick={() => { setDeskNotice(null); setDeskError(""); }}>
           <div
             className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-base font-medium">{deskNotice.label}</h2>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              {deskNotice.hint}. Desktop launchers such as Notepad, ADUC, and TeamViewer run on the Windows Help Desk
-              image, not in this web preview.
+              {deskError
+                ? deskError
+                : "Desktop launchers such as Notepad, ADUC, and TeamViewer run in the installed Spartan Browser on this PC, not in this web preview."}
             </p>
             <div className="mt-4 flex justify-end">
               <button
                 type="button"
                 className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--accent-fg)]"
-                onClick={() => setDeskNotice(null)}
+                onClick={() => {
+                  setDeskNotice(null);
+                  setDeskError("");
+                }}
               >
                 OK
               </button>
@@ -1059,7 +1085,7 @@ function ToolsPanel({
         )}
       </div>
       <h2 className="mt-5 px-1 text-xs font-medium tracking-[0.16em] text-[var(--muted)] uppercase">Desktop apps</h2>
-      <p className="mt-1 px-1 text-[11px] text-[var(--muted)]">Windows Help Desk image only.</p>
+      <p className="mt-1 px-1 text-[11px] text-[var(--muted)]">Opens on this Windows PC.</p>
       <div className="mt-2 flex flex-col gap-1 pb-4">
         {DESKTOP_APPS.map((app) => {
           let hint: string = app.hint;

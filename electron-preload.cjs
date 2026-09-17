@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld("spartanDesktop", {
   packaged: true,
   version: () => ipcRenderer.invoke("app-version"),
   windowsIdentity: () => ipcRenderer.invoke("windows-identity"),
+  launchApp: (id) => ipcRenderer.invoke("desktop:launch", id),
+  launchElevated: (payload) => ipcRenderer.invoke("desktop:elevated", payload),
   getUpdateStatus: () => ipcRenderer.invoke("updater:get"),
   checkForUpdates: () => ipcRenderer.invoke("updater:check"),
   installUpdate: () => ipcRenderer.invoke("updater:install"),

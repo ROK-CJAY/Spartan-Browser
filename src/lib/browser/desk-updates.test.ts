@@ -8,7 +8,10 @@ import {
   fallbackPolicy,
   parseDeskPolicy,
   setHostedAdmins,
+  setHostedModel,
+  getHostedModel,
   isHostedAdmin,
+  sanitizeModelUrl,
 } from "./desk-updates.ts";
 
 describe("compareVersions", () => {
@@ -70,5 +73,33 @@ describe("hosted admins cache", () => {
 describe("knowledge poll", () => {
   it("checks open desks about once a minute", () => {
     assert.equal(KNOWLEDGE_POLL_MS, 60_000);
+  });
+});
+
+describe("hosted model URL", () => {
+  it("keeps localhost, county, and RFC1918 hosts", () => {
+    assert.equal(sanitizeModelUrl("http://127.0.0.1:11434"), "http://127.0.0.1:11434");
+    assert.equal(sanitizeModelUrl("http://ollama.miamidade.gov:11434"), "http://ollama.miamidade.gov:11434");
+    assert.equal(sanitizeModelUrl("http://10.12.4.20:11434"), "http://10.12.4.20:11434");
+  });
+
+  it("rejects public internet hosts", () => {
+    assert.equal(sanitizeModelUrl("https://api.openai.com"), "");
+    assert.equal(sanitizeModelUrl("http://evil.example"), "");
+  });
+
+  it("reads modelUrl from policy", () => {
+    const policy = parseDeskPolicy({
+      schema: 1,
+      updatedAt: "2026-09-17T00:00:00Z",
+      admins: ["e315170@miamidade.gov"],
+      modelUrl: "http://10.1.2.3:11434",
+      modelName: "llama3.1",
+    });
+    assert.equal(policy?.modelUrl, "http://10.1.2.3:11434");
+    assert.equal(policy?.modelName, "llama3.1");
+    setHostedModel(policy?.modelUrl, policy?.modelName);
+    assert.equal(getHostedModel().url, "http://10.1.2.3:11434");
+    setHostedModel("", "");
   });
 });

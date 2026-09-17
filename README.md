@@ -24,8 +24,10 @@ Knowledge admins can upload a Remedy Excel/CSV export in **Knowledge admin**, th
 Workspace asks a real desk agent over the Remedy catalog (not SmartIT scrape, not a web search):
 
 1. Optional County Grok key (`XAI_API_KEY` on the machine)
-2. Optional Ollama on this PC (`127.0.0.1` only)
+2. Optional Ollama on this PC, or one County host listed as `modelUrl` in `policy/desk-policy.json` (localhost, `*.miamidade.gov`, or a private RFC1918 address)
 3. Always: an extractive answer from the matching current article, with outdated copies cited not followed
+
+The installed Windows app launches Notepad, Calculator, TeamViewer, Mocha, Lockout Status, ADUC, and CmRC on this PC. County sites (NSD, SmartIT, MyIT, Entra) send the signed-in Windows account over NTLM/Kerberos and use the PC’s system proxy / PAC so the desk looks like it is on the County network.
 
 ## Installable Windows release
 
@@ -36,8 +38,8 @@ Push a version tag to build a Setup `.exe` and attach it to a GitHub Release:
 3. Tag and push:
 
 ```
-git tag v0.9.4
-git push origin v0.9.4
+git tag v0.9.5
+git push origin v0.9.5
 ```
 
 GitHub Actions (Windows) runs tests, builds `SpartanBrowser-Setup-<version>.exe` with NSIS, and publishes the Release (installer + `latest.yml` + policy file).

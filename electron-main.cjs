@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, session, globalShortcut, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const http = require("http");
 const { spawn } = require("child_process");
 const { autoUpdater } = require("electron-updater");
@@ -7,10 +8,50 @@ const { autoUpdater } = require("electron-updater");
 const PORT = Number(process.env.SPARTAN_PORT || 47821);
 let serverProc = null;
 
-app.commandLine.appendSwitch("auth-server-whitelist", "*.miamidade.gov,*.sharepoint.com,login.microsoftonline.com");
-app.commandLine.appendSwitch("auth-negotiate-delegate-whitelist", "*.miamidade.gov,*.sharepoint.com");
+const AUTH_LIST = [
+  "*miamidade.gov",
+  "*.miamidade.gov",
+  "nsd.miamidade.gov",
+  "smartit.miamidade.gov",
+  "myit.miamidade.gov",
+  "*onbmc.com",
+  "*.onbmc.com",
+  "*sharepoint.com",
+  "*.sharepoint.com",
+  "login.microsoftonline.com",
+  "*.microsoftonline.com",
+  "*.msftauth.net",
+  "*.msauth.net",
+  "*.windows.net",
+  "*.office.com",
+  "*.office365.com",
+].join(",");
+
+const NTLM_URLS = [
+  "https://*.miamidade.gov",
+  "http://*.miamidade.gov",
+  "https://miamidade.gov",
+  "https://*.onbmc.com",
+  "https://*.sharepoint.com",
+  "https://login.microsoftonline.com",
+  "https://*.microsoftonline.com",
+  "https://*.msftauth.net",
+  "https://*.msauth.net",
+  "https://*.windows.net",
+  "https://*.office.com",
+  "https://*.office365.com",
+];
+
+const COUNTY_AUTH_HOST =
+  /miamidade\.gov|onbmc\.com|sharepoint\.com|microsoftonline\.com|msftauth\.net|msauth\.net|office\.com|office365\.com|windows\.net/i;
+
+app.commandLine.appendSwitch("auth-server-whitelist", AUTH_LIST);
+app.commandLine.appendSwitch("auth-server-allowlist", AUTH_LIST);
+app.commandLine.appendSwitch("auth-negotiate-delegate-whitelist", AUTH_LIST);
+app.commandLine.appendSwitch("auth-negotiate-delegate-allowlist", AUTH_LIST);
 app.commandLine.appendSwitch("auth-schemes", "ntlm,negotiate");
 app.commandLine.appendSwitch("proxy-auto-detect");
+app.commandLine.appendSwitch("disable-features", "ThirdPartyStoragePartitioning,TrackingProtection3pcd");
 
 function serverRoot() {
   if (app.isPackaged) return path.join(process.resourcesPath, "app-server");
@@ -24,7 +65,6 @@ function serverEntry() {
     path.join(root, "server", "index.js"),
     path.join(root, "index.mjs"),
   ];
-  const fs = require("fs");
   return candidates.find((file) => fs.existsSync(file)) ?? candidates[0];
 }
 
@@ -142,6 +182,106 @@ async function readWindowsIdentity() {
   return parseIdentity(scriptOut) || identityFromEnv();
 }
 
+function hardenCountySession(ses) {
+  if (!ses) return;
+  try {
+    ses.allowNTLMCredentialsForUrls(NTLM_URLS);
+  } catch (err) {
+    console.warn("[auth] NTLM allow list", err);
+  }
+  ses.setProxy({ mode: "system" }).catch(() => {});
+}
+
+const DESKTOP_LAUNCHERS = {
+  notepad: [{ cmd: "notepad.exe" }],
+  calc: [{ cmd: "calc.exe" }],
+  teamviewer: [
+    { path: "C:\\Program Files\\TeamViewer\\TeamViewer.exe" },
+    { path: "C:\\Program Files (x86)\\TeamViewer\\TeamViewer.exe" },
+    { cmd: "TeamViewer.exe" },
+  ],
+  mainframe: [
+    { path: "C:\\Program Files\\MochaSoft\\Mocha TN3270\\tn3270.exe" },
+    { path: "C:\\Program Files (x86)\\MochaSoft\\Mocha TN3270\\tn3270.exe" },
+    { path: "C:\\Program Files\\Mocha TN3270\\tn3270.exe" },
+    { cmd: "tn3270.exe" },
+  ],
+  lockout: [
+    { path: "C:\\Program Files\\Windows Resource Kits\\Tools\\lockoutstatus.exe" },
+    { path: "C:\\Program Files (x86)\\Windows Resource Kits\\Tools\\lockoutstatus.exe" },
+    { cmd: "lockoutstatus.exe" },
+  ],
+  aduc: [{ cmd: "mmc.exe", args: ["dsa.msc"] }],
+  cmrc: [
+    {
+      path: "C:\\Program Files (x86)\\Microsoft Configuration Manager\\AdminConsole\\bin\\i386\\CmRcViewer.exe",
+    },
+    { path: "C:\\Program Files\\Microsoft Configuration Manager\\AdminConsole\\bin\\i386\\CmRcViewer.exe" },
+    { cmd: "CmRcViewer.exe" },
+  ],
+};
+
+function spawnDetached(cmd, args = []) {
+  const child = spawn(cmd, args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false,
+    shell: false,
+  });
+  child.unref();
+}
+
+async function launchDesktopApp(id) {
+  const key = String(id || "").toLowerCase();
+  const candidates = DESKTOP_LAUNCHERS[key];
+  if (!candidates) return { ok: false, error: "Unknown desktop app." };
+  const errors = [];
+  for (const item of candidates) {
+    try {
+      if (item.path) {
+        if (!fs.existsSync(item.path)) continue;
+        const err = await shell.openPath(item.path);
+        if (!err) return { ok: true };
+        errors.push(err);
+        continue;
+      }
+      spawnDetached(item.cmd, item.args || []);
+      return { ok: true };
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return {
+    ok: false,
+    error: `Could not open this tool. Install it on this PC${errors[0] ? ` (${errors[0]})` : ""}.`,
+  };
+}
+
+function isSafeElevatedCommand(command) {
+  return /^powershell\.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand [A-Za-z0-9+/=]+$/i.test(
+    String(command || "").trim(),
+  );
+}
+
+function launchElevated(payload) {
+  const command = String(payload?.command || "").trim();
+  const password = String(payload?.password || "");
+  if (!isSafeElevatedCommand(command)) {
+    return { ok: false, error: "That launch command is not allowed." };
+  }
+  const parts = command.split(" ");
+  const encoded = parts[parts.length - 1];
+  const child = spawn(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+    { windowsHide: false, stdio: ["pipe", "ignore", "ignore"] },
+  );
+  child.stdin.write(`${password}\n`);
+  child.stdin.end();
+  child.unref();
+  return { ok: true };
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -182,6 +322,8 @@ ipcMain.handle("windows-identity", async () => {
     return identityFromEnv();
   }
 });
+ipcMain.handle("desktop:launch", async (_event, id) => launchDesktopApp(id));
+ipcMain.handle("desktop:elevated", async (_event, payload) => launchElevated(payload));
 
 const updateState = {
   phase: "idle",
@@ -273,7 +415,13 @@ ipcMain.handle("updater:install", () => {
 });
 
 app.on("web-contents-created", (_event, contents) => {
+  hardenCountySession(contents.session);
   contents.setWindowOpenHandler(({ url }) => keepInsideSpartan(url));
+  contents.on("will-attach-webview", (event, prefs) => {
+    prefs.partition = "persist:spartan";
+    prefs.nodeIntegration = false;
+    prefs.contextIsolation = true;
+  });
   contents.on("will-navigate", (event, url) => {
     if (contents.getType() !== "window") return;
     if (url.startsWith(`http://127.0.0.1:${PORT}`)) return;
@@ -285,7 +433,9 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.whenReady().then(async () => {
-  session.fromPartition("persist:spartan");
+  const ses = session.fromPartition("persist:spartan");
+  hardenCountySession(ses);
+  hardenCountySession(session.defaultSession);
   startServer();
   await waitForServer(`http://127.0.0.1:${PORT}/`);
   createWindow();
@@ -306,11 +456,12 @@ app.whenReady().then(async () => {
 });
 
 app.on("login", (event, _webContents, _request, authInfo, callback) => {
-  event.preventDefault();
-  if (!authInfo.isProxy && /miamidade\.gov|sharepoint\.com|microsoftonline\.com/.test(authInfo.host)) {
+  const scheme = String(authInfo.scheme || "").toLowerCase();
+  const host = String(authInfo.host || "");
+  if (authInfo.isProxy || scheme === "ntlm" || scheme === "negotiate" || COUNTY_AUTH_HOST.test(host)) {
+    event.preventDefault();
     callback("", "");
-  } else {
-    callback();
+    return;
   }
 });
 

@@ -3,6 +3,11 @@ export type SpartanWindowsIdentity = {
   account: string;
 };
 
+export type DesktopLaunchResult = {
+  ok: boolean;
+  error?: string;
+};
+
 export type DesktopUpdatePhase =
   | "idle"
   | "checking"
@@ -25,6 +30,8 @@ export type SpartanDesktopApi = {
   packaged: boolean;
   version: () => Promise<string>;
   windowsIdentity: () => Promise<SpartanWindowsIdentity | null>;
+  launchApp: (id: string) => Promise<DesktopLaunchResult>;
+  launchElevated: (payload: { command: string; password: string }) => Promise<DesktopLaunchResult>;
   getUpdateStatus: () => Promise<DesktopUpdateStatus>;
   checkForUpdates: () => Promise<DesktopUpdateStatus>;
   installUpdate: () => Promise<{ ok: boolean }>;

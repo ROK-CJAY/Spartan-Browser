@@ -8,6 +8,7 @@ import {
 } from "./knowledge-base";
 import { composeAgentReply, toAgentArticle } from "./desk-reply";
 import { loadPublishedArticles } from "./knowledge-server";
+import { getHostedModel, sanitizeModelUrl } from "./desk-updates";
 
 export type DeskAgentArticle = {
   id: string;
@@ -109,14 +110,7 @@ async function completeGrok(apiKey: string, question: string, articles: Knowledg
 }
 
 function safeOllamaOrigin(raw: string) {
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") return null;
-    return url.origin;
-  } catch {
-    return null;
-  }
+  return sanitizeModelUrl(raw) || null;
 }
 
 async function completeOllama(
@@ -201,17 +195,21 @@ export const askDeskAgent = createServerFn({ method: "POST" })
       }
     }
 
-    const origin = data.ollamaEnabled ? safeOllamaOrigin(data.ollamaUrl || "http://127.0.0.1:11434") : null;
+    const hosted = getHostedModel();
+    const origin = data.ollamaEnabled
+      ? safeOllamaOrigin(data.ollamaUrl || "") || safeOllamaOrigin(hosted.url) || safeOllamaOrigin("http://127.0.0.1:11434")
+      : safeOllamaOrigin(hosted.url);
+    const model = data.ollamaModel || hosted.name || "llama3.1";
     if (origin) {
       try {
-        const text = await completeOllama(origin, data.ollamaModel, question, ranked);
+        const text = await completeOllama(origin, model, question, ranked);
         if (text) {
           const result: DeskAgentResult = { ok: true, mode: "ollama", text, articles };
           cache.set(key, { at: Date.now(), revision, result });
           return result;
         }
       } catch {
-        /* local model optional */
+        /* local / org model optional */
       }
     }
 

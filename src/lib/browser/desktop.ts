@@ -1,8 +1,8 @@
 import { isCountyEmail, normalizeEmail } from "./knowledge-base.ts";
-import type { DesktopUpdateStatus } from "@/types/spartan-desktop";
+import type { DesktopLaunchResult, DesktopUpdateStatus } from "@/types/spartan-desktop";
 
 export function isSpartanDesktop() {
-  return typeof window !== "undefined" && Boolean(window.spartanDesktop?.packaged);
+  return typeof window !== "undefined" && Boolean(window.spartanDesktop);
 }
 
 export async function readDesktopWindowsIdentity() {
@@ -18,6 +18,31 @@ export async function readDesktopWindowsIdentity() {
     return { upn, account: identity?.account?.trim() ?? "" };
   } catch {
     return null;
+  }
+}
+
+export async function launchDesktopApp(id: string): Promise<DesktopLaunchResult> {
+  const api = typeof window === "undefined" ? undefined : window.spartanDesktop;
+  if (!api?.launchApp) return { ok: false, error: "Desktop launch is only available in the installed browser." };
+  try {
+    return await api.launchApp(id);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Could not open that app." };
+  }
+}
+
+export async function launchElevatedTool(payload: {
+  command: string;
+  password: string;
+}): Promise<DesktopLaunchResult> {
+  const api = typeof window === "undefined" ? undefined : window.spartanDesktop;
+  if (!api?.launchElevated) {
+    return { ok: false, error: "Desktop launch is only available in the installed browser." };
+  }
+  try {
+    return await api.launchElevated(payload);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Could not start that tool." };
   }
 }
 
