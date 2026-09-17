@@ -1,7 +1,7 @@
 import { isCountyEmail, normalizeEmail, SEEDED_KNOWLEDGE_ADMINS } from "./knowledge-base.ts";
 
 
-export const APP_VERSION = "0.9.6";
+export const APP_VERSION = "0.9.7";
 export const HDB_REPO = "ROK-CJAY/Spartan-Browser";
 
 export const POLICY_URLS = [

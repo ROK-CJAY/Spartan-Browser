@@ -270,7 +270,7 @@ function Chrome({
   const [deskNotice, setDeskNotice] = useState<(typeof DESKTOP_APPS)[number] | null>(null);
   const [deskError, setDeskError] = useState("");
   const [elevatedTool, setElevatedTool] = useState<null | "aduc" | "cmrc">(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  const [reloadKeys, setReloadKeys] = useState<Record<string, number>>({});
   const [mobilePanel, setMobilePanel] = useState(false);
   const [deskUpdate, setDeskUpdate] = useState<DeskUpdateStatus | null>(null);
   const [installer, setInstaller] = useState<DesktopUpdateStatus | null>(null);
@@ -415,8 +415,8 @@ function Chrome({
       }
       if (e.key === "F5" || (e.ctrlKey && e.key.toLowerCase() === "r")) {
         e.preventDefault();
-        setReloadKey((n) => n + 1);
-        store.navigate(store.activeTab().url, store.activeTab().title);
+        const id = store.activeTab().id;
+        setReloadKeys((n) => ({ ...n, [id]: (n[id] ?? 0) + 1 }));
         return;
       }
       if (e.ctrlKey && e.key.toLowerCase() === "h") {
@@ -665,7 +665,10 @@ function Chrome({
             >
               <ChevronRight className="size-5" />
             </IconBtn>
-            <IconBtn label="Reload" onClick={() => setReloadKey((n) => n + 1)}>
+            <IconBtn
+              label="Reload"
+              onClick={() => setReloadKeys((n) => ({ ...n, [tab.id]: (n[tab.id] ?? 0) + 1 }))}
+            >
               <RotateCw className="size-4" />
             </IconBtn>
             {config.showHomeButton ? (
@@ -785,8 +788,19 @@ function Chrome({
             </div>
           ) : null}
           <div className="flex min-h-0 min-w-0 flex-1" style={{ zoom: `${zoom}%` }}>
-            <div className="min-h-0 min-w-0 flex-1">
-              <PageView url={tab.url} title={tab.title} reloadKey={reloadKey} />
+            <div className="relative min-h-0 min-w-0 flex-1">
+              {profile.tabs.map((t) => (
+                <div
+                  key={t.id}
+                  className={cn(
+                    "absolute inset-0 h-full w-full",
+                    t.id === tab.id ? "z-10" : "z-0 invisible pointer-events-none",
+                  )}
+                  aria-hidden={t.id !== tab.id}
+                >
+                  <PageView tabId={t.id} url={t.url} title={t.title} reloadKey={reloadKeys[t.id] ?? 0} />
+                </div>
+              ))}
             </div>
             {splitView ? (
               <div className="min-h-0 min-w-0 flex-1 border-l border-[var(--border)]">
@@ -1274,7 +1288,17 @@ function ProfilePanel() {
   );
 }
 
-function PageView({ url, title, reloadKey }: { url: string; title: string; reloadKey: number }) {
+function PageView({
+  tabId,
+  url,
+  title,
+  reloadKey,
+}: {
+  tabId: string;
+  url: string;
+  title: string;
+  reloadKey: number;
+}) {
   if (url === HOME_URL || url === "about:blank") return <WorkspaceHome />;
   if (url === SETTINGS_URL) return <SettingsPage />;
   if (url === KNOWLEDGE_URL) return <KnowledgeAdminPage />;
@@ -1282,14 +1306,35 @@ function PageView({ url, title, reloadKey }: { url: string; title: string; reloa
   if (url === DOWNLOADS_URL) return <DownloadsPage />;
   if (url === FAVORITES_URL) return <FavoritesPage />;
   if (isSpartanDesktop() && /^https?:/i.test(url)) {
-    return <DesktopWebview url={url} title={title} reloadKey={reloadKey} />;
+    return <DesktopWebview tabId={tabId} url={url} title={title} reloadKey={reloadKey} />;
   }
   if (requiresSecureLaunch(url)) return <SecureLaunch url={url} title={title} />;
+  return <PersistentIframe url={url} title={title} reloadKey={reloadKey} />;
+}
+
+function PersistentIframe({ url, title, reloadKey }: { url: string; title: string; reloadKey: number }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const lastUrl = useRef(url);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.src = url;
+    lastUrl.current = url;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || url === lastUrl.current) return;
+    lastUrl.current = url;
+    el.src = url;
+  }, [url]);
+
   return (
     <iframe
-      key={`${url}-${reloadKey}`}
+      ref={ref}
       title={title || displayTitle(url)}
-      src={url}
       className="h-full w-full border-0 bg-white"
       sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-downloads"
       referrerPolicy="no-referrer-when-downgrade"

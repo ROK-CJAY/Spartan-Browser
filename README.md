@@ -38,8 +38,8 @@ Push a version tag to build a Setup `.exe` and attach it to a GitHub Release:
 3. Tag and push:
 
 ```
-git tag v0.9.6
-git push origin v0.9.6
+git tag v0.9.7
+git push origin v0.9.7
 ```
 
 GitHub Actions (Windows) runs tests, builds `SpartanBrowser-Setup-<version>.exe` with NSIS, and publishes the Release (installer + `latest.yml` + policy file).

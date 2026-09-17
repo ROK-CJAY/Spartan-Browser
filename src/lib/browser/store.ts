@@ -81,6 +81,7 @@ type BrowserStore = BrowserPayload & {
   setKiosk: (on: boolean) => void;
   setAddressDraft: (v: string) => void;
   navigate: (raw: string, title?: string) => void;
+  navigateTab: (tabId: string, raw: string, title?: string) => void;
   goHome: () => void;
   goBack: () => void;
   goForward: () => void;
@@ -94,7 +95,7 @@ type BrowserStore = BrowserPayload & {
   cycleTab: (dir: 1 | -1) => void;
   selectTabAt: (index: number) => void;
   selectTab: (id: string) => void;
-  setTabTitle: (title: string) => void;
+  setTabTitle: (title: string, tabId?: string) => void;
   addBookmark: (folder?: string) => boolean;
   removeBookmark: (id: string) => void;
   renameBookmark: (id: string, title: string) => void;
@@ -157,11 +158,12 @@ function recordVisit(
   title: string,
   skipHistory: boolean,
   sessionMode: "push" | "replace" | "keep" = "push",
+  tabId = profile.activeTabId,
 ): Profile {
   if (!url || url.startsWith("about:")) return profile;
   const titleText = displayTitle(url, title);
   const tabs = profile.tabs.map((raw) => {
-    if (raw.id !== profile.activeTabId) return raw;
+    if (raw.id !== tabId) return raw;
     const t = normalizeTab(raw);
     if (sessionMode === "keep") return { ...t, url, title: titleText };
     if (sessionMode === "replace" || t.url === url) {
@@ -453,6 +455,17 @@ export const useBrowserStore = create<BrowserStore>()(
           ),
         });
       },
+      navigateTab: (tabId, raw, title) => {
+        const url = normalizeUrl(raw, get().config.searchEngine);
+        const s = get();
+        const active = s.activeProfile().activeTabId === tabId;
+        set({
+          ...(active ? { addressDraft: url } : {}),
+          profiles: withActive(s.profiles, s.activeProfileId, (p) =>
+            recordVisit(p, url, title ?? "", s.config.privateMode, "push", tabId),
+          ),
+        });
+      },
       goHome: () => get().navigate(get().theme.startPage || HOME_URL, "Workspace"),
       canGoBack: () => {
         const t = normalizeTab(get().activeTab());
@@ -589,12 +602,13 @@ export const useBrowserStore = create<BrowserStore>()(
         const tab = get().activeTab();
         set({ addressDraft: tab.url });
       },
-      setTabTitle: (title) => {
+      setTabTitle: (title, tabId) => {
         const s = get();
+        const id = tabId ?? s.activeProfile().activeTabId;
         set({
           profiles: withActive(s.profiles, s.activeProfileId, (p) => ({
             ...p,
-            tabs: p.tabs.map((t) => (t.id === p.activeTabId ? { ...t, title } : t)),
+            tabs: p.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
           })),
         });
       },

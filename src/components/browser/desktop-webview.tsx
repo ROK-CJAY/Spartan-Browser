@@ -6,7 +6,16 @@ type WebviewEl = HTMLElement & {
   getURL?: () => string;
 };
 
-export function DesktopWebview({ url, reloadKey }: { url: string; title: string; reloadKey: number }) {
+export function DesktopWebview({
+  tabId,
+  url,
+  reloadKey,
+}: {
+  tabId: string;
+  url: string;
+  title: string;
+  reloadKey: number;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<WebviewEl | null>(null);
   const lastUrl = useRef(url);
@@ -35,8 +44,7 @@ export function DesktopWebview({ url, reloadKey }: { url: string; title: string;
     const syncUrl = (next: string) => {
       if (!next || next === lastUrl.current) return;
       lastUrl.current = next;
-      const current = useBrowserStore.getState().activeTab().url;
-      if (current !== next) useBrowserStore.getState().navigate(next);
+      useBrowserStore.getState().navigateTab(tabId, next);
     };
 
     const onNavigate = (event: Event) => {
@@ -45,7 +53,7 @@ export function DesktopWebview({ url, reloadKey }: { url: string; title: string;
     };
     const onTitle = (event: Event) => {
       const title = (event as Event & { title?: string }).title?.trim();
-      if (title) useBrowserStore.getState().setTabTitle(title);
+      if (title) useBrowserStore.getState().setTabTitle(title, tabId);
     };
 
     view.addEventListener("did-navigate", onNavigate);
@@ -61,7 +69,7 @@ export function DesktopWebview({ url, reloadKey }: { url: string; title: string;
     };
     // Recreate only on explicit reload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reloadKey]);
+  }, [reloadKey, tabId]);
 
   useEffect(() => {
     const view = viewRef.current;
